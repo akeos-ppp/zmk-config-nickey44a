@@ -25,9 +25,35 @@
 };
 
 / {
+    tps43_scroll_inertia: tps43_scroll_inertia {
+        compatible = "zmk,input-processor-scroll-inertia";
+        #input-processor-cells = <0>;
+
+        /* IQS5xx emits integer wheel steps after its unchanged /32 scaling. */
+        axis = <0>;
+        gain = <400>;
+        blend = <600>;
+        start = <1>;
+        move = <6>;
+        min-events = <3>;
+        release = <40>;
+        gesture-timeout = <120>;
+        decay-fast = <990>;
+        decay-slow = <990>;
+        decay-tail = <990>;
+        friction = <35>;
+        stop = <1>;
+        limit = <12>;
+        span = <1500>;
+        tick = <8>;
+        scale = <1000>;
+        scale-div = <1000>;
+    };
+
     tps43_listener: tps43_listener {
         compatible = "zmk,input-listener";
         device = <&tps43>;
+        input-processors = <&tps43_scroll_inertia>;
     };
 };
 
@@ -56,7 +82,6 @@
         bottom-beta = <5>;
         stationary-threshold = <5>;
         switch-xy;
-        flip-x;
     };
 };
 
