@@ -1,5 +1,7 @@
 #include "nickey44a.dtsi"
 #include <dt-bindings/pinctrl/nrf-pinctrl.h>
+#include <dt-bindings/zmk/input_transform.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 /*
  * TPS43 FPC breakout wiring:
@@ -25,6 +27,14 @@
 };
 
 / {
+    tps43_orientation: tps43_orientation {
+        compatible = "zmk,input-processor-transform";
+        #input-processor-cells = <1>;
+        type = <INPUT_EV_REL>;
+        x-codes = <INPUT_REL_X INPUT_REL_HWHEEL>;
+        y-codes = <INPUT_REL_Y INPUT_REL_WHEEL>;
+    };
+
     tps43_scroll_inertia: tps43_scroll_inertia {
         compatible = "zmk,input-processor-scroll-inertia";
         #input-processor-cells = <0>;
@@ -53,7 +63,11 @@
     tps43_listener: tps43_listener {
         compatible = "zmk,input-listener";
         device = <&tps43>;
-        input-processors = <&tps43_scroll_inertia>;
+        /* Correct the measured controller output: left -> down, down -> left. */
+        input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
+                                             INPUT_TRANSFORM_X_INVERT |
+                                             INPUT_TRANSFORM_Y_INVERT)>,
+                           <&tps43_scroll_inertia>;
     };
 };
 
@@ -81,7 +95,7 @@
 
         bottom-beta = <5>;
         stationary-threshold = <5>;
-        /* Touch side up, TPS43 notch on the right: rotate axes for vertical use. */
+        /* Controller settings used when the listener's correction was measured. */
         switch-xy;
         flip-x;
     };
