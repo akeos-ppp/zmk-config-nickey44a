@@ -6,8 +6,8 @@ manifest:
       url-base: https://github.com/cormoran
     - name: caksoylar  # <-- RGB LED
       url-base: https://github.com/caksoylar
-    - name: aym1607
-      url-base: https://github.com/AYM1607
+    - name: geeksville
+      url-base: https://github.com/geeksville
     - name: mjmjm0101
       url-base: https://github.com/mjmjm0101
   projects:
@@ -18,9 +18,9 @@ manifest:
     - name: zmk-rgbled-widget
       remote: caksoylar
       revision: 8756cb7b8114069fa3c25c6f6c990f24988fceff # v0.3
-    - name: zmk-driver-azoteq-iqs5xx
-      remote: aym1607
-      revision: 27321f0232b50f0af31eb27ff97d539933467ea4
+    - name: zmk_driver_azoteq
+      remote: geeksville
+      revision: 66d510249d139569a4060c35bd78c6a2159f83ed
     - name: zmk-input-processor-scroll-inertia
       remote: mjmjm0101
       revision: f7dadefee453d555fe066d13a3de3bb60739b45e

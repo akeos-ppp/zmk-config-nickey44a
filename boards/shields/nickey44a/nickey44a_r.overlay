@@ -44,7 +44,7 @@
         compatible = "zmk,input-processor-scroll-inertia";
         #input-processor-cells = <0>;
 
-        /* IQS5xx emits integer wheel steps after its unchanged /32 scaling. */
+        /* Legacy /32 wheel tuning; disconnected until retuned for the TPS43 driver. */
         axis = <0>;
         gain = <400>;
         blend = <600>;
@@ -71,8 +71,7 @@
         /* Correct the measured controller output: left -> down, down -> left. */
         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
                                              INPUT_TRANSFORM_X_INVERT |
-                                             INPUT_TRANSFORM_Y_INVERT)>,
-                           <&tps43_scroll_inertia>;
+                                             INPUT_TRANSFORM_Y_INVERT)>;
     };
 };
 
@@ -86,23 +85,26 @@
     #address-cells = <1>;
     #size-cells = <0>;
 
-    tps43: iqs5xx@74 {
-        compatible = "azoteq,iqs5xx";
+    tps43: tps43@74 {
+        compatible = "azoteq,tps43";
         reg = <0x74>;
         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
-        one-finger-tap;
+        single-tap;
         two-finger-tap;
         press-and-hold;
         scroll;
-        natural-scroll-x;
-        natural-scroll-y;
+        invert-scroll-y;
 
-        bottom-beta = <5>;
-        stationary-threshold = <5>;
+        filter-settings = <0x0B>;
+        filter-dynamic-bottom = <5>;
+        sensitivity = <100>;
+        scroll-sensitivity = <100>;
+        hold-time = <250>;
+        enable-power-management;
         /* Controller settings used when the listener's correction was measured. */
         switch-xy;
-        flip-x;
+        invert-x;
     };
 };
 
