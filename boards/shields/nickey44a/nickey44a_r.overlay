@@ -5,22 +5,27 @@
 
 /*
  * TPS43 FPC breakout wiring:
- *   SCL = XIAO D5/P0.05, SDA = XIAO D4/P0.04, RDY = XIAO D3/P0.29.
+ *   SDA = XIAO NFC1/P0.09, SCL = XIAO NFC2/P0.10,
+ *   RDY = XIAO hidden pad P0.16 (PDM_DATA; not free on Sense boards).
  * NRST is held high in hardware and is not controlled by the MCU.
  */
+
+&uicr {
+    nfct-pins-as-gpios;
+};
 
 &pinctrl {
     nickey44a_tps43_i2c0_default: nickey44a_tps43_i2c0_default {
         group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            psels = <NRF_PSEL(TWIM_SDA, 0, 9)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 10)>;
         };
     };
 
     nickey44a_tps43_i2c0_sleep: nickey44a_tps43_i2c0_sleep {
         group1 {
-            psels = <NRF_PSEL(TWIM_SDA, 0, 4)>,
-                    <NRF_PSEL(TWIM_SCL, 0, 5)>;
+            psels = <NRF_PSEL(TWIM_SDA, 0, 9)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 10)>;
             low-power-enable;
         };
     };
@@ -84,7 +89,7 @@
     tps43: iqs5xx@74 {
         compatible = "azoteq,iqs5xx";
         reg = <0x74>;
-        rdy-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+        rdy-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
 
         one-finger-tap;
         two-finger-tap;
@@ -106,9 +111,12 @@
 };
 
 &kscan0 {
-        /* D3/D4/D5 are reserved for TPS43 RDY/SDA/SCL during bring-up. */
         col-gpios
             = <&xiao_d 1 GPIO_ACTIVE_HIGH>
             , <&xiao_d 2 GPIO_ACTIVE_HIGH>
+            , <&xiao_d 3 GPIO_ACTIVE_HIGH>
+            , <&xiao_d 4 GPIO_ACTIVE_HIGH>
+            , <&xiao_d 5 GPIO_ACTIVE_HIGH>
+            , <&xiao_d 6 GPIO_ACTIVE_HIGH>
             ;
 };
