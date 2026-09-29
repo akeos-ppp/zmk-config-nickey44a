@@ -81,7 +81,9 @@
 
         bottom-beta = <5>;
         stationary-threshold = <5>;
+        /* Touch side up, TPS43 notch on the right: rotate axes for vertical use. */
         switch-xy;
+        flip-x;
     };
 };
 
