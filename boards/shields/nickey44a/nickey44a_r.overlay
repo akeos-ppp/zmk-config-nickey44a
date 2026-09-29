@@ -89,7 +89,7 @@
     tps43: iqs5xx@74 {
         compatible = "azoteq,iqs5xx";
         reg = <0x74>;
-        rdy-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+        rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
         one-finger-tap;
         two-finger-tap;
