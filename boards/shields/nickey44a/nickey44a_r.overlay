@@ -94,12 +94,14 @@
         two-finger-tap;
         press-and-hold;
         scroll;
+        /* The listener swaps axes, so driver X controls host vertical scrolling. */
+        invert-scroll-x;
         invert-scroll-y;
 
         filter-settings = <0x0B>;
         filter-dynamic-bottom = <5>;
         sensitivity = <100>;
-        scroll-sensitivity = <100>;
+        scroll-sensitivity = <50>;
         hold-time = <250>;
         enable-power-management;
         /* Controller settings used when the listener's correction was measured. */
