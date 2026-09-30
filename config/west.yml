@@ -8,6 +8,8 @@ manifest:
       url-base: https://github.com/caksoylar
     - name: geeksville
       url-base: https://github.com/geeksville
+    - name: beekeeb
+      url-base: https://github.com/beekeeb
     - name: mjmjm0101
       url-base: https://github.com/mjmjm0101
   projects:
@@ -24,5 +26,8 @@ manifest:
     - name: zmk-input-processor-scroll-inertia
       remote: mjmjm0101
       revision: f7dadefee453d555fe066d13a3de3bb60739b45e
+    - name: zmk-input-zoom
+      remote: beekeeb
+      revision: 91bbe0c0e02145da50c9df798489479d28be1804
   self:
     path: config
