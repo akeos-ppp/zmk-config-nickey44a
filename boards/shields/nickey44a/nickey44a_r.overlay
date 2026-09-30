@@ -1,6 +1,7 @@
 #include "nickey44a.dtsi"
 #include <dt-bindings/pinctrl/nrf-pinctrl.h>
 #include <dt-bindings/zmk/input_transform.h>
+#include <dt-bindings/zmk/keys.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 /*
@@ -32,6 +33,18 @@
 };
 
 / {
+    tps43_swipe_actions: tps43_swipe_actions {
+        compatible = "zmk,input-processor-behaviors";
+        #input-processor-cells = <0>;
+        type = <INPUT_EV_KEY>;
+        /* Match the measured orientation: host X = -driver Y, host Y = -driver X.
+         * Directional KEY events are not transformed by tps43_orientation.
+         * Physical right -> NORTH, left -> SOUTH, up -> EAST, down -> WEST.
+         */
+        codes = <INPUT_BTN_NORTH INPUT_BTN_SOUTH INPUT_BTN_EAST INPUT_BTN_WEST>;
+        bindings = <&kp LA(LEFT)>, <&kp LA(RIGHT)>, <&kp LGUI>, <&none>;
+    };
+
     tps43_orientation: tps43_orientation {
         compatible = "zmk,input-processor-transform";
         #input-processor-cells = <1>;
@@ -71,7 +84,8 @@
         /* Correct the measured controller output: left -> down, down -> left. */
         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
                                              INPUT_TRANSFORM_X_INVERT |
-                                             INPUT_TRANSFORM_Y_INVERT)>;
+                                             INPUT_TRANSFORM_Y_INVERT)>,
+                           <&tps43_swipe_actions>;
     };
 };
 
@@ -94,13 +108,14 @@
         two-finger-tap;
         press-and-hold;
         scroll;
+        three-finger-swipe;
         /* The listener swaps axes, so driver X controls host vertical scrolling. */
         invert-scroll-y;
 
         filter-settings = <0x0B>;
         filter-dynamic-bottom = <5>;
         sensitivity = <100>;
-        scroll-sensitivity = <10>;
+        scroll-sensitivity = <5>;
         hold-time = <250>;
         enable-power-management;
         /* Controller settings used when the listener's correction was measured. */
