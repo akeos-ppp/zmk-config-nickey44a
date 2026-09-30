@@ -1,0 +1,26 @@
+description: Touch-release inertia for a relative wheel axis
+compatible: "zmk,input-processor-touch-inertia"
+include: ip_zero_param.yaml
+properties:
+  wheel-code:
+    type: int
+    required: true
+  touch-code:
+    type: int
+    required: true
+  tick-ms:
+    type: int
+    default: 10
+    description: Tick interval in milliseconds; zero is treated as one.
+  decay-permille:
+    type: int
+    default: 920
+    description: Velocity retention per tick, from 0 through 999.
+  stop-threshold-q8:
+    type: int
+    default: 96
+    description: Positive minimum speed in Q8 wheel units per tick.
+  ema-new-permille:
+    type: int
+    default: 250
+    description: New sample weight, from 0 through 1000.

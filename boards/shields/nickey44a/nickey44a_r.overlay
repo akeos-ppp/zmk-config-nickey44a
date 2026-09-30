@@ -40,29 +40,15 @@
         y-codes = <INPUT_REL_Y INPUT_REL_WHEEL>;
     };
 
-    tps43_scroll_inertia: tps43_scroll_inertia {
-        compatible = "zmk,input-processor-scroll-inertia";
+    tps43_touch_inertia: tps43_touch_inertia {
+        compatible = "zmk,input-processor-touch-inertia";
         #input-processor-cells = <0>;
-
-        /* Legacy /32 wheel tuning; disconnected until retuned for the TPS43 driver. */
-        axis = <0>;
-        gain = <400>;
-        blend = <600>;
-        start = <1>;
-        move = <6>;
-        min-events = <3>;
-        release = <40>;
-        gesture-timeout = <120>;
-        decay-fast = <990>;
-        decay-slow = <990>;
-        decay-tail = <990>;
-        friction = <35>;
-        stop = <1>;
-        limit = <12>;
-        span = <1500>;
-        tick = <8>;
-        scale = <1000>;
-        scale-div = <1000>;
+        wheel-code = <INPUT_REL_WHEEL>;
+        touch-code = <INPUT_BTN_TOUCH>;
+        tick-ms = <10>;
+        decay-permille = <920>;
+        stop-threshold-q8 = <96>;
+        ema-new-permille = <250>;
     };
 
     tps43_listener: tps43_listener {
@@ -71,7 +57,7 @@
         /* Correct the measured controller output: left -> down, down -> left. */
         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
                                              INPUT_TRANSFORM_X_INVERT |
-                                             INPUT_TRANSFORM_Y_INVERT)>;
+                                             INPUT_TRANSFORM_Y_INVERT)>, <&tps43_touch_inertia>;
     };
 };
 
