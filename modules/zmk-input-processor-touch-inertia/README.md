@@ -29,6 +29,7 @@ touch_inertia: touch_inertia {
     stop-threshold-q8 = <96>;
     launch-threshold-q8 = <384>;
     ema-new-permille = <250>;
+    cancel-scroll-inertia-on-ctrl;
 };
 ```
 
@@ -45,6 +46,14 @@ The first sample uses delta times 256; subsequent samples use measured uptime
 intervals clamped to at least 1 ms. EMA applies even to the first sample.
 Release without a wheel sample does nothing. Repeated release events do not
 restart inertia. Wheel input cancels an existing coast, including zero input.
+
+With `cancel-scroll-inertia-on-ctrl`, either left or right Ctrl in the ZMK
+keyboard HID report suppresses velocity sampling and touch-release inertia.
+Manual Ctrl+wheel events still pass through unchanged. An active coast checks
+Ctrl before each report and stops at the next tick (10 ms by default), clearing
+its velocity and remainder so releasing Ctrl cannot resume it. The property is
+optional and enabled in Nickey44A's TPS43 overlay. Ctrl on another keyboard is
+not visible to this firmware.
 
 Each delayed work tick accumulates fractional motion, emits only vertical
 scroll directly through ZMK HID, and multiplies speed by decay-permille/1000.
@@ -75,6 +84,9 @@ Verify slow scroll, both flick directions, exponential stopping, re-touch
 cancellation, and reversal after cancellation. Tap, hold, touch alone, pinch
 alone, and horizontal swipe alone must never initiate vertical inertia.
 Confirm Back/Forward and pinch zoom remain unaffected if processors exist.
+Check both Ctrl keys with scrolling and touch release, and press Ctrl during
+an active coast. Releasing Ctrl must not resume the old coast; a fresh normal
+scroll must still launch inertia.
 Check deep sleep/wake followed by scrolling and flicking. No activity-state
 subscription is included; add one only if hardware testing demonstrates a
 stale state across sleep. Firmware build success does not verify touch feel

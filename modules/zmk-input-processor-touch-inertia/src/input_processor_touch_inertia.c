@@ -10,6 +10,7 @@
 
 #include <limits.h>
 #include <drivers/input_processor.h>
+#include <dt-bindings/zmk/modifiers.h>
 #include <zmk/hid.h>
 #include <zmk/endpoints.h>
 
@@ -24,6 +25,7 @@ struct touch_inertia_config {
     int32_t stop_threshold_q8;
     int32_t launch_threshold_q8;
     int32_t ema_new_permille;
+    bool cancel_scroll_inertia_on_ctrl;
 };
 
 struct touch_inertia_data {
@@ -40,6 +42,11 @@ struct touch_inertia_data {
 
 static int32_t bounded_velocity(int64_t value) {
     return CLAMP(value, (int64_t)INT32_MIN, (int64_t)INT32_MAX);
+}
+
+static bool ctrl_mod_is_active(const struct touch_inertia_config *cfg) {
+    return cfg->cancel_scroll_inertia_on_ctrl &&
+           (zmk_hid_get_keyboard_report()->body.modifiers & (MOD_LCTL | MOD_RCTL)) != 0;
 }
 
 static bool below_threshold(const struct touch_inertia_data *data,
@@ -72,7 +79,7 @@ static void inertia_tick(struct k_work *work) {
     if (!data->inertia_running) {
         goto done;
     }
-    if (data->touching || below_threshold(data, cfg)) {
+    if (ctrl_mod_is_active(cfg) || data->touching || below_threshold(data, cfg)) {
         clear_scroll(data);
         goto done;
     }
@@ -116,6 +123,11 @@ static int observe_input(const struct device *dev, struct input_event *event,
 
     /* Serialize reset and report emission: no old tick can run after touch-down. */
     k_mutex_lock(&data->lock, K_FOREVER);
+    bool ctrl_active = ctrl_mod_is_active(cfg);
+    if (ctrl_active) {
+        /* Manual Ctrl+wheel still passes through; discard its launch velocity. */
+        clear_scroll(data);
+    }
     if (event->type == INPUT_EV_KEY) {
         if (event->value != 0) {
             clear_scroll(data);
@@ -134,7 +146,7 @@ static int observe_input(const struct device *dev, struct input_event *event,
         if (data->inertia_running) {
             clear_scroll(data);
         }
-        if (event->value != 0 && data->touching) {
+        if (!ctrl_active && event->value != 0 && data->touching) {
             int64_t now = k_uptime_get();
             /* Multiplication, rather than a signed left shift, also handles negatives. */
             int64_t sample = (int64_t)event->value * Q8_ONE;
@@ -187,6 +199,7 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
         .stop_threshold_q8 = DT_INST_PROP(n, stop_threshold_q8),                                   \
         .launch_threshold_q8 = DT_INST_PROP(n, launch_threshold_q8),                               \
         .ema_new_permille = DT_INST_PROP(n, ema_new_permille),                                     \
+        .cancel_scroll_inertia_on_ctrl = DT_INST_PROP(n, cancel_scroll_inertia_on_ctrl),           \
     };                                                                                           \
     DEVICE_DT_INST_DEFINE(n, initialize, NULL, &data_##n, &config_##n, POST_KERNEL,                 \
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
