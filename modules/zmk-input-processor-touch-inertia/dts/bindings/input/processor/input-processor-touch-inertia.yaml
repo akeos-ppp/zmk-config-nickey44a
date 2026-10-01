@@ -19,7 +19,11 @@ properties:
   stop-threshold-q8:
     type: int
     default: 96
-    description: Positive minimum speed in Q8 wheel units per tick.
+    description: Inertia stops below this positive Q8 velocity in wheel units per tick.
+  launch-threshold-q8:
+    type: int
+    default: 384
+    description: Minimum Q8 velocity required to start inertia on touch release.
   ema-new-permille:
     type: int
     default: 250

@@ -22,6 +22,7 @@ struct touch_inertia_config {
     int32_t tick_ms;
     int32_t decay_permille;
     int32_t stop_threshold_q8;
+    int32_t launch_threshold_q8;
     int32_t ema_new_permille;
 };
 
@@ -45,6 +46,12 @@ static bool below_threshold(const struct touch_inertia_data *data,
                             const struct touch_inertia_config *cfg) {
     return data->velocity_q8 > -cfg->stop_threshold_q8 &&
            data->velocity_q8 < cfg->stop_threshold_q8;
+}
+
+static bool above_launch_threshold(const struct touch_inertia_data *data,
+                                   const struct touch_inertia_config *cfg) {
+    return data->velocity_q8 >= cfg->launch_threshold_q8 ||
+           data->velocity_q8 <= -cfg->launch_threshold_q8;
 }
 
 /* Called with the instance lock held, including from the work handler. */
@@ -115,7 +122,7 @@ static int observe_input(const struct device *dev, struct input_event *event,
             data->touching = true;
         } else if (data->touching) {
             data->touching = false;
-            if (data->scroll_seen && !below_threshold(data, cfg)) {
+            if (data->scroll_seen && above_launch_threshold(data, cfg)) {
                 data->inertia_running = true;
                 data->remainder_q8 = 0;
                 k_work_reschedule(&data->inertia_work, K_MSEC(cfg->tick_ms));
@@ -166,6 +173,11 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
                  DT_INST_PROP(n, stop_threshold_q8) <= INT32_MAX, "stop threshold must be positive"); \
     BUILD_ASSERT(DT_INST_PROP(n, ema_new_permille) >= 0 &&                                         \
                  DT_INST_PROP(n, ema_new_permille) <= 1000, "EMA weight must be 0..1000");         \
+    BUILD_ASSERT(DT_INST_PROP(n, launch_threshold_q8) > 0 &&                                      \
+                 DT_INST_PROP(n, launch_threshold_q8) <= INT32_MAX,                             \
+                 "launch threshold must be positive and fit int32_t");                         \
+    BUILD_ASSERT(DT_INST_PROP(n, launch_threshold_q8) >= DT_INST_PROP(n, stop_threshold_q8),      \
+                 "launch threshold must be at least the stop threshold");                      \
     static struct touch_inertia_data data_##n;                                                    \
     static const struct touch_inertia_config config_##n = {                                       \
         .wheel_code = DT_INST_PROP(n, wheel_code),                                                \
@@ -173,6 +185,7 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
         .tick_ms = MAX(1, DT_INST_PROP(n, tick_ms)),                                               \
         .decay_permille = DT_INST_PROP(n, decay_permille),                                         \
         .stop_threshold_q8 = DT_INST_PROP(n, stop_threshold_q8),                                   \
+        .launch_threshold_q8 = DT_INST_PROP(n, launch_threshold_q8),                               \
         .ema_new_permille = DT_INST_PROP(n, ema_new_permille),                                     \
     };                                                                                           \
     DEVICE_DT_INST_DEFINE(n, initialize, NULL, &data_##n, &config_##n, POST_KERNEL,                 \

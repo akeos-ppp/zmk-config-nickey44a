@@ -27,6 +27,7 @@ touch_inertia: touch_inertia {
     tick-ms = <10>;
     decay-permille = <920>;
     stop-threshold-q8 = <96>;
+    launch-threshold-q8 = <384>;
     ema-new-permille = <250>;
 };
 ```
@@ -54,14 +55,20 @@ The instance mutex serializes touch reset with work/report emission. Input
 callbacks must run in thread context (the normal Zephyr input listener path).
 
 tick-ms=0 becomes 1. Negative tick values, decay outside 0..999, nonpositive
-stop threshold, and EMA weights outside 0..1000 fail at compile time.
+stop or launch thresholds, launch below stop, thresholds exceeding INT32_MAX,
+and EMA weights outside 0..1000 fail at compile time.
 No floating point, release timeout, flick classification, or axis guessing.
 
 ## Tuning and hardware checks
 
-Defaults: 10 ms, decay 920, threshold 96 Q8 (0.375 units/tick), EMA weight 250.
+Defaults: 10 ms, decay 920, stop threshold 96 Q8 (0.375 units/tick), launch
+threshold 384 Q8 (1.5 units/tick), EMA weight 250.
+`launch-threshold-q8` is the minimum speed magnitude required to start inertia
+on touch release (inclusive). `stop-threshold-q8` stops running inertia when
+the speed magnitude falls below it. Keeping launch higher than stop prevents
+unintended inertia after slow scrolling while preserving the decaying tail.
 Raise decay to 940/960 for longer inertia; lower to 900/880 for shorter inertia.
-Raise threshold to 128 for an earlier stop; lower to 64 for a longer tail.
+Raise stop threshold to 128 for an earlier stop; lower to 64 for a longer tail.
 Lower EMA weight to 200 for more smoothing; raise to 350 for quicker response.
 
 Verify slow scroll, both flick directions, exponential stopping, re-touch

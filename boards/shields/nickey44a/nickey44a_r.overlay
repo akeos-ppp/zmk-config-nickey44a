@@ -49,6 +49,7 @@
         tick-ms = <10>;
         decay-permille = <920>;
         stop-threshold-q8 = <96>;
+        launch-threshold-q8 = <384>;
         ema-new-permille = <250>;
     };
 
