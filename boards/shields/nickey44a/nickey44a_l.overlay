@@ -95,7 +95,7 @@
         filter-dynamic-bottom = <5>;
         sensitivity = <100>;
         scroll-sensitivity = <5>;
-        hold-time = <80>;
+        hold-time = <10>;
         enable-power-management;
         /* Keep physical vertical motion on WHEEL: no controller XY swap. */
         invert-x;
