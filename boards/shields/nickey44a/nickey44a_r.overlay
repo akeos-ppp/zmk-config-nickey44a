@@ -35,6 +35,21 @@
 };
 
 / {
+    split_inputs {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        left_tps43_split: left_tps43_split@0 {
+            compatible = "zmk,input-split";
+            reg = <0>;
+        };
+    };
+
+    left_tps43_listener: left_tps43_listener {
+        compatible = "zmk,input-listener";
+        device = <&left_tps43_split>;
+    };
+
     tps43_orientation: tps43_orientation {
         compatible = "zmk,input-processor-transform";
         #input-processor-cells = <1>;
@@ -103,7 +118,6 @@
 
         single-tap;
         two-finger-tap;
-        press-and-hold;
         scroll;
         /* The listener swaps axes, so driver X controls host vertical scrolling. */
         invert-scroll-y;
