@@ -90,6 +90,8 @@
         press-and-hold;
         two-finger-tap;
         scroll;
+        /* Reverse vertical gestures before WHEEL is mapped to HWHEEL. */
+        invert-scroll-y;
 
         filter-settings = <0x0B>;
         filter-dynamic-bottom = <5>;

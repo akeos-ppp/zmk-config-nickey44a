@@ -21,6 +21,9 @@ NRST=P0.16、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるた�
 | 3 | `left_wheel_to_hwheel` | REL_WHEELをREL_HWHEELへ変換、値と符号は保持 |
 | 4 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
 
+左TPS43の`invert-scroll-y`でWHEELの符号を反転してからHWHEELへ変換する。
+上下スワイプによる水平スクロール方向は、初期のデュアルTPS43設定と逆になる。
+
 BTN_0は変換しない。左はsingle-tapを有効にせず、press-and-hold、
 two-finger-tap、scrollのみ有効。hold-time=80ms。
 標準scalerはイベントを破棄せず値を0にするため、X/Yと元HWHEELの
