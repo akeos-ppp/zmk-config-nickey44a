@@ -13,7 +13,29 @@
 };
 
 / {
-    combos { compatible = "zmk,combos"; };
+    combos {
+        compatible = "zmk,combos";
+
+        combo_esc {
+            bindings = <&kp ESCAPE>;
+            key-positions = <0 1>;
+        };
+
+        combo_tab {
+            bindings = <&kp TAB>;
+            key-positions = <12 13>;
+        };
+
+        left_p {
+            bindings = <&kp LEFT_PARENTHESIS>;
+            key-positions = <14 15>;
+        };
+
+        right_p {
+            bindings = <&kp RIGHT_PARENTHESIS>;
+            key-positions = <15 15 16>;
+        };
+    };
 
     macros {
         to_layer_0: to_layer_0 {
