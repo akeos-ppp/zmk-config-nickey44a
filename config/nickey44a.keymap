@@ -35,6 +35,36 @@
             bindings = <&kp RIGHT_PARENTHESIS>;
             key-positions = <15 15 16>;
         };
+
+        l_d {
+            bindings = <&kp LA(LC(D))>;
+            key-positions = <24 25>;
+        };
+
+        c_d {
+            bindings = <&kp LS(LA(F))>;
+            key-positions = <25 26>;
+        };
+
+        r_d {
+            bindings = <&kp LS(LA(G))>;
+            key-positions = <26 27>;
+        };
+
+        f_d {
+            bindings = <&kp LS(LA(ENTER))>;
+            key-positions = <27 28>;
+        };
+
+        cap_1 {
+            bindings = <&kp RS(RG(NUMBER_4))>;
+            key-positions = <37 36>;
+        };
+
+        r_d2 {
+            bindings = <&kp LS(LA(T))>;
+            key-positions = <38 38 39>;
+        };
     };
 
     macros {
