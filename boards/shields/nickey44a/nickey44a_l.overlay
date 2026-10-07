@@ -8,7 +8,7 @@
  *   SDA = XIAO NFC1/P0.09
  *   SCL = XIAO NFC2/P0.10
  *   RDY = XIAO P1.10
- *   NRST = XIAO P1.00
+ *   NRST = XIAO P0.16
  */
 
 &uicr {
