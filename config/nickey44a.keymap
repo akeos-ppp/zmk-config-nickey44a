@@ -40,19 +40,19 @@
 
         default_layer {
             bindings = <
-&kp Q        &kp W  &kp E  &kp R  &trans         &trans                                                    &trans       &trans          &kp Y  &kp U  &kp O                &kp P
-&kp A        &kp S  &kp D  &kp F  &trans         &trans                                                    &trans       &trans          &kp H  &kp J  &kp L                &mt EQUAL MINUS
-&mt LSHFT Z  &kp Z  &kp C  &kp V  &trans         &trans       &trans           &trans                      &trans       &trans          &kp N  &kp M  &mt SEMICOLON COMMA  &mt RIGHT_SHIFT PERIOD
-                                  &mt LCTRL DQT  &lt 3 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 2 ENTER  &mt RALT SLASH
+&kp Q        &kp W  &kp E  &kp R  &kp T                    &trans                                                    &trans       &kp Y             &kp U  &kp I                &kp O                    &kp P
+&kp A        &kp S  &kp D  &kp F  &kp G                    &trans                                                    &trans       &kp H             &kp J  &kp K                &kp L                    &mt EQUAL MINUS
+&mt LSHFT Z  &kp Z  &kp C  &kp V  &kp B                    &trans       &trans           &trans                      &trans       &kp N             &kp M  &mt SEMICOLON COMMA  &mt SINGLE_QUOTE PERIOD  &mt RIGHT_SHIFT SLASH
+                                  &mt LCTRL DOUBLE_QUOTES  &lt 2 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 1 ENTER  &mt RALT AT_SIGN
             >;
         };
 
         layer_1 {
             bindings = <
-&kp ESCAPE    &kp NUMBER_1  &kp NUMBER_2  &kp NUMBER_3  &kp NUMBER_4  &kp NUMBER_5                        &kp NUMBER_6      &kp N7                &kp N8                 &kp N9             &kp N0         &kp GRAVE
-&kp LEFT_WIN  &kp F1        &kp F2        &kp F3        &kp F4        &kp F5                              &kp LEFT          &kp DOWN              &kp UP                 &kp RIGHT          &trans         &kp TILDE
-&trans        &kp F6        &kp F7        &kp F8        &kp F9        &kp F10       &trans    &trans      &kp LEFT_BRACKET  &kp LEFT_PARENTHESIS  &kp RIGHT_PARENTHESIS  &kp RIGHT_BRACKET  &kp BACKSLASH  &trans
-                                                        &mo 3         &trans        &trans    &kp DELETE  &trans            &trans
+&kp NUMBER_1  &kp NUMBER_2  &kp NUMBER_3  &kp NUMBER_4  &kp N5   &trans                    &trans  &kp NUMBER_6     &kp N7         &kp N8        &kp N9      &kp N0
+&kp F1        &kp F2        &kp F3        &kp F4        &kp F5   &trans                    &trans  &kp EXCLAMATION  &kp AT_SIGN    &kp HASH      &kp DOLLAR  &kp PERCENT
+&kp F6        &kp F7        &kp F8        &kp F9        &kp F10  &trans  &trans    &trans  &trans  &kp RIGHT_ALT    &kp AMPERSAND  &kp ASTERISK  &kp TILDE   &kp PIPE
+                                                        &trans   &trans  &trans    &trans  &trans  &trans
             >;
         };
 
