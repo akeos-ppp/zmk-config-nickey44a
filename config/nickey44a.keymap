@@ -65,6 +65,11 @@
             bindings = <&kp LS(LA(T))>;
             key-positions = <38 38 39>;
         };
+
+        system {
+            bindings = <&to 3>;
+            key-positions = <38 39 40>;
+        };
     };
 
     macros {
