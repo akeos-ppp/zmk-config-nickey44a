@@ -10,7 +10,7 @@
  *   SDA = XIAO NFC1/P0.09
  *   SCL = XIAO NFC2/P0.10
  *   RDY = XIAO P1.10
- *   NRST = XIAO P0.16
+ *   NRST = XIAO P1.00
  */
 
 &uicr {
@@ -113,7 +113,7 @@
     tps43: tps43@74 {
         compatible = "azoteq,tps43";
         reg = <0x74>;
-        rst-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+        rst-gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
         single-tap;
