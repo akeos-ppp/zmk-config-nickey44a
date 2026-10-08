@@ -65,8 +65,10 @@
     };
 
     /*
-     * Left pad: one Back/Forward per two-finger left/right swipe. If the
-     * direction is reversed on hardware, swap the two keycodes.
+     * Left pad: one Back/Forward per two-finger left/right swipe, and one
+     * browser tab switch per two-finger up/down swipe (Ctrl+Tab = next tab,
+     * Ctrl+Shift+Tab = previous tab). If a direction is reversed on hardware,
+     * swap that pair of keycodes.
      */
     left_touch_swipe: left_touch_swipe {
         compatible = "zmk,input-processor-touch-swipe";
@@ -78,9 +80,11 @@
         axis-ratio = <2>;
         left-keycode = <C_AC_BACK>;
         right-keycode = <C_AC_FORWARD>;
+        up-keycode = <LC(LS(TAB))>;
+        down-keycode = <LC(TAB)>;
     };
 
-    /* Left pad: vertical two-finger scroll does nothing. */
+    /* Left pad: vertical two-finger motion only switches tabs, never scrolls. */
     left_wheel_blocker: left_wheel_blocker {
         compatible = "zmk,input-processor-scaler";
         #input-processor-cells = <2>;
@@ -93,7 +97,7 @@
         device = <&left_tps43_split>;
         /*
          * Observe the circle, turn HWHEEL into Back/Forward (touch-swipe always
-         * consumes HWHEEL), then zero WHEEL and X/Y.
+         * consumes HWHEEL) and WHEEL into tab switching, then zero WHEEL and X/Y.
          */
         input-processors = <&left_circle_volume>, <&left_touch_swipe>,
                            <&left_wheel_blocker 0 1>, <&zip_xy_scaler 0 1>;
