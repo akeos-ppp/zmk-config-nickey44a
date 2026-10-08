@@ -45,9 +45,58 @@
         };
     };
 
+    /*
+     * Left pad: one-finger circular motion changes the volume (clockwise =
+     * up, 45 degrees per step). If the direction feels reversed on hardware,
+     * swap the two keycodes.
+     */
+    left_circle_volume: left_circle_volume {
+        compatible = "zmk,input-processor-circle-keys";
+        #input-processor-cells = <0>;
+        x-code = <INPUT_REL_X>;
+        y-code = <INPUT_REL_Y>;
+        touch-code = <INPUT_BTN_TOUCH>;
+        segment-distance = <12>;
+        step-degrees = <45>;
+        max-turn-degrees = <90>;
+        idle-reset-ms = <200>;
+        clockwise-keycode = <C_VOL_UP>;
+        counterclockwise-keycode = <C_VOL_DN>;
+    };
+
+    /*
+     * Left pad: one Back/Forward per two-finger left/right swipe. If the
+     * direction is reversed on hardware, swap the two keycodes.
+     */
+    left_touch_swipe: left_touch_swipe {
+        compatible = "zmk,input-processor-touch-swipe";
+        #input-processor-cells = <0>;
+        hwheel-code = <INPUT_REL_HWHEEL>;
+        wheel-code = <INPUT_REL_WHEEL>;
+        touch-code = <INPUT_BTN_TOUCH>;
+        threshold = <8>;
+        axis-ratio = <2>;
+        left-keycode = <C_AC_BACK>;
+        right-keycode = <C_AC_FORWARD>;
+    };
+
+    /* Left pad: vertical two-finger scroll does nothing. */
+    left_wheel_blocker: left_wheel_blocker {
+        compatible = "zmk,input-processor-scaler";
+        #input-processor-cells = <2>;
+        type = <INPUT_EV_REL>;
+        codes = <INPUT_REL_WHEEL>;
+    };
+
     left_tps43_listener: left_tps43_listener {
         compatible = "zmk,input-listener";
         device = <&left_tps43_split>;
+        /*
+         * Observe the circle, turn HWHEEL into Back/Forward (touch-swipe always
+         * consumes HWHEEL), then zero WHEEL and X/Y.
+         */
+        input-processors = <&left_circle_volume>, <&left_touch_swipe>,
+                           <&left_wheel_blocker 0 1>, <&zip_xy_scaler 0 1>;
     };
 
     tps43_orientation: tps43_orientation {
@@ -58,16 +107,35 @@
         y-codes = <INPUT_REL_Y INPUT_REL_WHEEL>;
     };
 
-    tps43_touch_swipe: tps43_touch_swipe {
-        compatible = "zmk,input-processor-touch-swipe";
+
+    /*
+     * Three-finger gestures (macOS): tap = Launchpad, up/down = Mission Control, left/right =
+     * adjacent Space, following the trackpad convention (fingers left -> the
+     * Space to the right). The driver reports controller coordinates; with
+     * the measured orientation above, controller SOUTH = physical left,
+     * NORTH = right, EAST = up, WEST = down.
+     */
+    tps43_three_finger_swipe: tps43_three_finger_swipe {
+        compatible = "zmk,input-processor-three-finger-swipe";
         #input-processor-cells = <0>;
-        hwheel-code = <INPUT_REL_HWHEEL>;
-        wheel-code = <INPUT_REL_WHEEL>;
         touch-code = <INPUT_BTN_TOUCH>;
-        threshold = <8>;
+        left-code = <INPUT_BTN_SOUTH>;
+        right-code = <INPUT_BTN_NORTH>;
+        up-code = <INPUT_BTN_EAST>;
+        down-code = <INPUT_BTN_WEST>;
+        threshold = <3>;
         axis-ratio = <2>;
-        left-keycode = <C_AC_BACK>;
-        right-keycode = <C_AC_FORWARD>;
+        left-keycode = <LC(RIGHT)>;
+        right-keycode = <LC(LEFT)>;
+        up-keycode = <LC(UP)>;
+        down-keycode = <LC(UP)>;
+        /* Driver-local three-finger contact code (TPS43_BTN_THREE_FINGERS). */
+        three-finger-code = <0x14e>;
+        /* Three-finger tap = Launchpad; same shortcut as the keymap's LAUNCH macro. */
+        tap-keycode = <LG(L)>;
+        tap-max-ms = <300>;
+        tap-max-samples = <2>;
+        click-suppress-ms = <150>;
     };
 
     tps43_touch_inertia: tps43_touch_inertia {
@@ -90,7 +158,7 @@
         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
                                              INPUT_TRANSFORM_X_INVERT |
                                              INPUT_TRANSFORM_Y_INVERT)>,
-                           <&tps43_touch_swipe>, <&tps43_touch_inertia>;
+                           <&tps43_three_finger_swipe>, <&tps43_touch_inertia>;
 
         snipe_layer {
             layers = <1>;
@@ -117,8 +185,17 @@
         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
         single-tap;
+        /*
+         * Touch and stay still for hold-time to press the left button and drag.
+         * drag-lock keeps it pressed after lift; the next single tap releases.
+         */
+        press-and-hold;
+        drag-lock;
         two-finger-tap;
         scroll;
+        /* One driver event per three-finger sample; the processor fires once per touch. */
+        three-finger-swipe;
+        three-finger-swipe-throttle-ms = <0>;
         /* The listener swaps axes, so driver X controls host vertical scrolling. */
         invert-scroll-y;
 

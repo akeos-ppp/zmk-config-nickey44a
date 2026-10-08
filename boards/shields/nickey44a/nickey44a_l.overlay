@@ -33,20 +33,6 @@
 };
 
 / {
-    left_hwheel_blocker: left_hwheel_blocker {
-        compatible = "zmk,input-processor-scaler";
-        #input-processor-cells = <2>;
-        type = <INPUT_EV_REL>;
-        codes = <INPUT_REL_HWHEEL>;
-    };
-
-    left_wheel_to_hwheel: left_wheel_to_hwheel {
-        compatible = "zmk,input-processor-code-mapper";
-        #input-processor-cells = <0>;
-        type = <INPUT_EV_REL>;
-        map = <INPUT_REL_WHEEL INPUT_REL_HWHEEL>;
-    };
-
     left_middle_click_mapper: left_middle_click_mapper {
         compatible = "zmk,input-processor-code-mapper";
         #input-processor-cells = <0>;
@@ -62,11 +48,13 @@
             compatible = "zmk,input-split";
             reg = <0>;
             device = <&left_tps43>;
-            /* Block native HWHEEL before mapping WHEEL to HWHEEL. */
-            input-processors = <&zip_xy_scaler 0 1>,
-                               <&left_hwheel_blocker 0 1>,
-                               <&left_wheel_to_hwheel>,
-                               <&left_middle_click_mapper>;
+            /*
+             * X/Y, WHEEL and HWHEEL are forwarded unchanged. The central turns
+             * one-finger circles into volume and two-finger left/right swipes
+             * into Back/Forward, then zeroes the rest: the left pad never
+             * moves the cursor or scrolls.
+             */
+            input-processors = <&left_middle_click_mapper>;
         };
     };
 };
@@ -87,17 +75,16 @@
         rst-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
-        press-and-hold;
+        /* No press-and-hold: one-finger motion is the volume circle. */
         two-finger-tap;
         scroll;
-        /* Reverse vertical gestures before WHEEL is mapped to HWHEEL. */
+        /* Vertical two-finger scroll is blocked on the central; kept for reference. */
         invert-scroll-y;
 
         filter-settings = <0x0B>;
         filter-dynamic-bottom = <5>;
         sensitivity = <100>;
         scroll-sensitivity = <5>;
-        hold-time = <1>;
         enable-power-management;
         /* Keep physical vertical motion on WHEEL: no controller XY swap. */
         invert-x;
