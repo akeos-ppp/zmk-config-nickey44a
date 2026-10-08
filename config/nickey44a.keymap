@@ -42,17 +42,17 @@
         };
 
         c_d {
-            bindings = <&kp LS(LA(F))>;
+            bindings = <&kp LA(F)>;
             key-positions = <25 26>;
         };
 
         r_d {
-            bindings = <&kp LS(LA(G))>;
+            bindings = <&kp LA(G)>;
             key-positions = <26 27>;
         };
 
         f_d {
-            bindings = <&kp LS(LA(ENTER))>;
+            bindings = <&kp LA(ENTER)>;
             key-positions = <27 28>;
         };
 
@@ -62,7 +62,7 @@
         };
 
         r_d2 {
-            bindings = <&kp LS(LA(T))>;
+            bindings = <&kp LA(T)>;
             key-positions = <38 38 39>;
         };
 
@@ -111,10 +111,10 @@
 
         default_layer {
             bindings = <
-&kp Q        &kp W  &kp E  &kp R  &kp T                    &trans                                                    &trans       &kp Y             &kp U  &kp I                &kp O                    &kp P
-&kp A        &kp S  &kp D  &kp F  &kp G                    &trans                                                    &trans       &kp H             &kp J  &kp K                &kp L                    &mt EQUAL MINUS
-&mt LSHFT Z  &kp Z  &kp C  &kp V  &kp B                    &trans       &trans           &trans                      &trans       &kp N             &kp M  &mt SEMICOLON COMMA  &mt SINGLE_QUOTE PERIOD  &mt RIGHT_SHIFT SLASH
-                                  &mt LCTRL DOUBLE_QUOTES  &lt 2 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 1 ENTER  &mt RALT AT_SIGN
+&kp Q        &kp W  &kp E  &kp R  &kp T      &trans                                                    &trans       &kp Y          &kp U  &kp I                &kp O                    &kp P
+&kp A        &kp S  &kp D  &kp F  &kp G      &trans                                                    &trans       &kp H          &kp J  &kp K                &kp L                    &mt EQUAL MINUS
+&mt LSHFT Z  &kp X  &kp C  &kp V  &kp B      &trans       &trans           &trans                      &trans       &kp N          &kp M  &mt SEMICOLON COMMA  &mt SINGLE_QUOTE PERIOD  &mt RIGHT_SHIFT SLASH
+                                  &kp LCTRL  &lt 2 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 1 ENTER  &kp RIGHT_ALT
             >;
         };
 
