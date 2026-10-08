@@ -1,4 +1,4 @@
-description: One horizontal swipe per complete touch, with configurable ZMK keycodes
+description: One horizontal or vertical swipe per complete touch, with configurable ZMK keycodes
 compatible: "zmk,input-processor-touch-swipe"
 include: ip_zero_param.yaml
 properties:
@@ -27,3 +27,12 @@ properties:
     type: int
     required: true
     description: Encoded ZMK keycode tapped on a positive horizontal swipe.
+  up-keycode:
+    type: int
+    description: Optional encoded ZMK keycode tapped on a positive vertical (WHEEL) swipe.
+  down-keycode:
+    type: int
+    description: Optional encoded ZMK keycode tapped on a negative vertical (WHEEL) swipe.
+  vertical-threshold:
+    type: int
+    description: Positive minimum net vertical wheel units; defaults to threshold.
