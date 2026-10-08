@@ -199,7 +199,7 @@ combos:
   k: Alt+Ctl+ENTER
 - p: [37, 36]
   k: Sft+Gui+4
-- p: [38, 38, 39]
+- p: [16, 17]
   k: Alt+Ctl+T
 - p: [38, 39, 40]
   k: {t: '3', h: toggle}

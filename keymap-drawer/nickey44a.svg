@@ -362,9 +362,9 @@ path.combo {
 </text>
 </g>
 <g class="combo combopos-9">
-<rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
-<text x="271" y="196" class="combo tap">
-<tspan x="271" dy="-0.6em">Alt+Ctl</tspan><tspan x="271" dy="1.2em">+T</tspan>
+<rect rx="6" ry="6" x="266" y="71" width="28" height="26" class="combo"/>
+<text x="280" y="84" class="combo tap">
+<tspan x="280" dy="-0.6em">Alt+Ctl</tspan><tspan x="280" dy="1.2em">+T</tspan>
 </text>
 </g>
 <g class="combo combopos-10">
@@ -607,9 +607,9 @@ path.combo {
 </text>
 </g>
 <g class="combo combopos-9">
-<rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
-<text x="271" y="196" class="combo tap">
-<tspan x="271" dy="-0.6em">Alt+Ctl</tspan><tspan x="271" dy="1.2em">+T</tspan>
+<rect rx="6" ry="6" x="266" y="71" width="28" height="26" class="combo"/>
+<text x="280" y="84" class="combo tap">
+<tspan x="280" dy="-0.6em">Alt+Ctl</tspan><tspan x="280" dy="1.2em">+T</tspan>
 </text>
 </g>
 <g class="combo combopos-10">
@@ -855,9 +855,9 @@ path.combo {
 </text>
 </g>
 <g class="combo combopos-9">
-<rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
-<text x="271" y="196" class="combo tap">
-<tspan x="271" dy="-0.6em">Alt+Ctl</tspan><tspan x="271" dy="1.2em">+T</tspan>
+<rect rx="6" ry="6" x="266" y="71" width="28" height="26" class="combo"/>
+<text x="280" y="84" class="combo tap">
+<tspan x="280" dy="-0.6em">Alt+Ctl</tspan><tspan x="280" dy="1.2em">+T</tspan>
 </text>
 </g>
 <g class="combo combopos-10">
@@ -1108,9 +1108,9 @@ path.combo {
 </text>
 </g>
 <g class="combo combopos-9">
-<rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
-<text x="271" y="196" class="combo tap">
-<tspan x="271" dy="-0.6em">Alt+Ctl</tspan><tspan x="271" dy="1.2em">+T</tspan>
+<rect rx="6" ry="6" x="266" y="71" width="28" height="26" class="combo"/>
+<text x="280" y="84" class="combo tap">
+<tspan x="280" dy="-0.6em">Alt+Ctl</tspan><tspan x="280" dy="1.2em">+T</tspan>
 </text>
 </g>
 <g class="combo combopos-10">
