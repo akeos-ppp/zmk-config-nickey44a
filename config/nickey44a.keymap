@@ -63,7 +63,7 @@
 
         r_d2 {
             bindings = <&kp LA(LC(T))>;
-            key-positions = <38 38 39>;
+            key-positions = <16 17>;
         };
 
         system {
