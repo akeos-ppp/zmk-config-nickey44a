@@ -1,0 +1,61 @@
+description: One four-way three-finger swipe or tap per complete touch, with configurable ZMK keycodes
+compatible: "zmk,input-processor-three-finger-swipe"
+include: ip_zero_param.yaml
+properties:
+  touch-code:
+    type: int
+    required: true
+  left-code:
+    type: int
+    required: true
+    description: Input key code the driver reports for one physically leftward sample.
+  right-code:
+    type: int
+    required: true
+  up-code:
+    type: int
+    required: true
+  down-code:
+    type: int
+    required: true
+  threshold:
+    type: int
+    default: 3
+    description: Positive minimum net same-axis samples before firing.
+  axis-ratio:
+    type: int
+    default: 2
+    description: Positive ratio of net samples to the other axis's total samples.
+  left-keycode:
+    type: int
+    required: true
+    description: Encoded ZMK keycode tapped on a leftward swipe.
+  right-keycode:
+    type: int
+    required: true
+  up-keycode:
+    type: int
+    required: true
+  down-keycode:
+    type: int
+    required: true
+  three-finger-code:
+    type: int
+    required: true
+    description: Input key code the driver reports while exactly three fingers are down.
+  tap-keycode:
+    type: int
+    default: 0
+    description: Encoded ZMK keycode tapped on a three-finger tap; 0 disables taps.
+  tap-max-ms:
+    type: int
+    default: 300
+    description: Maximum touch duration, first contact to full release, for a tap.
+  tap-max-samples:
+    type: int
+    default: 2
+    description: Maximum three-finger direction samples allowed in a tap.
+  click-suppress-ms:
+    type: int
+    default: 150
+    description: After a three-finger touch, drop INPUT_BTN_0/1 events for this long.
