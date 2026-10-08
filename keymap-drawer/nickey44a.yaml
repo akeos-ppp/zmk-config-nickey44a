@@ -192,14 +192,14 @@ combos:
 - p: [24, 25]
   k: Alt+Ctl+D
 - p: [25, 26]
-  k: Alt+F
+  k: Alt+Ctl+F
 - p: [26, 27]
-  k: Alt+G
+  k: Alt+Ctl+G
 - p: [27, 28]
-  k: Alt+ENTER
+  k: Alt+Ctl+ENTER
 - p: [37, 36]
   k: Sft+Gui+4
 - p: [38, 38, 39]
-  k: Alt+T
+  k: Alt+Ctl+T
 - p: [38, 39, 40]
   k: {t: '3', h: toggle}
