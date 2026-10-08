@@ -9,7 +9,7 @@ NRST=左P0.16／右P1.00、I2Cアドレス=0x74。各MCUに独立したI2Cバス
 ```text
 左TPS43 → 左input-splitの標準processors → BLE split (reg=0)
         → 右input-split proxy (reg=0) → 左専用input-listener
-        → 音量サークル検出 → 二本指左右で戻る/進む → WHEEL・X/Y 0化 → 共通HID
+        → 音量サークル検出 → 二本指左右で戻る/進む・上下でタブ切替 → WHEEL・X/Y 0化 → 共通HID
 右TPS43 → 右input-listener → orientation → 三本指ジェスチャー → inertia/Snipe → 共通HID
 ```
 
@@ -25,8 +25,8 @@ REL_X/Y、WHEEL、HWHEELは変換せずに転送する。右の左専用listener
 | 順序 | Processor | 結果 |
 |---|---|---|
 | 1 | `left_circle_volume` | 一本指の回転で音量（時計回り=アップ、45度ごと） |
-| 2 | `left_touch_swipe` | 二本指左右スワイプ1回で戻る/進む、HWHEELは常に破棄 |
-| 3 | `left_wheel_blocker 0 1` | 二本指上下（WHEEL）を0化 |
+| 2 | `left_touch_swipe` | 二本指左右スワイプ1回で戻る/進む、上下スワイプ1回でタブ切替（Ctrl+Tab / Ctrl+Shift+Tab）、HWHEELは常に破棄 |
+| 3 | `left_wheel_blocker 0 1` | タブ切替後のWHEELを0化（スクロールはしない） |
 | 4 | `zip_xy_scaler 0 1` | X/Yを0化、左パッドでカーソルは動かない |
 
 右パッドの二本指左右スワイプはtouch-swipeを通さず、そのまま横スクロールになる。
