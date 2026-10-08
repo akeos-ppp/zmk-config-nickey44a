@@ -169,7 +169,7 @@ def main():
                 value = int(value * params[0] / params[1])
         assert value == 25, code
     print("PASS: built pins, gestures, split routing, roles, battery/sleep/Studio config")
-    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, sync")
+    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, WHEEL zeroed after tab switch, sync")
     print("PASS: left X/Y reach the central volume circle and never move the cursor")
     print("Hardware/BLE/Deep Sleep acceptance tests remain manual.")
 
