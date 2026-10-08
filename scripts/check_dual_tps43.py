@@ -1,4 +1,4 @@
-"""Check built Devicetrees/configs and model the standard left processor chain.
+"""Check built Devicetrees/configs and model the left pad processor chains.
 
 Run with the Python environment used by west. This checks configuration and
 event semantics; it does not simulate BLE, TPS43 silicon, or host HID timing.
@@ -49,8 +49,8 @@ def main():
     assert lc.get("CONFIG_ZMK_SPLIT_ROLE_CENTRAL") != "y"
     assert rc.get("CONFIG_ZMK_SPLIT_ROLE_CENTRAL") == "y"
     assert rc.get("CONFIG_ZMK_INPUT_LISTENER") == "y"
-    for name in ("ZMK_INPUT_PROCESSOR_SCALER", "ZMK_INPUT_PROCESSOR_CODE_MAPPER"):
-        assert lc.get("CONFIG_" + name) == "y", name
+    assert lc.get("CONFIG_ZMK_INPUT_PROCESSOR_CODE_MAPPER") == "y"
+    assert rc.get("CONFIG_ZMK_INPUT_PROCESSOR_SCALER") == "y"
     for name in ("ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY",
                  "ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING", "ZMK_STUDIO"):
         assert rc.get("CONFIG_" + name) == "y", name
@@ -59,8 +59,10 @@ def main():
     rt = right.label2node["tps43"]
     for dt, node in ((left, lt), (right, rt)):
         assert node.props["reg"].to_nums() == [0x74]
+        # NRST: left P0.16, right P1.00.
+        rst_port, rst_pin = ("gpio0", 16) if dt is left else ("gpio1", 0)
         assert cells_of(node.props["rst-gpios"]) == [
-            dt.label2node["gpio0"].props["phandle"].to_num(), 16, 0]
+            dt.label2node[rst_port].props["phandle"].to_num(), rst_pin, 0]
         assert cells_of(node.props["rdy-gpios"]) == [
             dt.label2node["gpio1"].props["phandle"].to_num(), 10, 0]
         assert enabled(node, "enable-power-management")
@@ -77,14 +79,17 @@ def main():
                     values = cells_of(prop)
                     for index in range(0, len(values), 3):
                         if values[index:index + 2] == [gpio0, 16]:
-                            assert candidate is node and prop.name == "rst-gpios"
+                            assert dt is left and candidate is node and \
+                                prop.name == "rst-gpios"
                 if prop.name == "psels":
                     assert all(v & 0x1ff != 16 for v in prop.to_nums())
-    assert enabled(lt, "press-and-hold") and not enabled(lt, "single-tap")
+    # Left: one-finger motion is the volume circle, so no press-and-hold.
+    assert not enabled(lt, "press-and-hold") and not enabled(lt, "single-tap")
     assert not enabled(lt, "switch-xy")
-    assert lt.props["hold-time"].to_num() == 80
-    assert not enabled(rt, "press-and-hold")
-    for name in ("single-tap", "two-finger-tap", "scroll", "switch-xy", "invert-x"):
+    assert "hold-time" not in lt.props
+    # Right: press-and-hold drag and three-finger gestures.
+    for name in ("single-tap", "press-and-hold", "two-finger-tap", "scroll", "switch-xy",
+                 "invert-x", "three-finger-swipe"):
         assert enabled(rt, name), name
     assert enabled(lt, "two-finger-tap") and enabled(lt, "scroll")
 
@@ -95,25 +100,44 @@ def main():
     assert "device" not in rs.props
     listener = right.label2node["left_tps43_listener"]
     assert listener.props["device"].to_node() is rs
-    assert "input-processors" not in listener.props
 
-    chain, cells = [], cells_of(ls.props["input-processors"])
-    while cells:
-        node = left.phandle2node[cells.pop(0)]
-        count = node.props["#input-processor-cells"].to_num()
-        chain.append((node, cells[:count]))
-        del cells[:count]
-    assert [n.name for n, _ in chain] == [
-        "zip_xy_scaler", "left_hwheel_blocker", "left_wheel_to_hwheel",
-        "left_middle_click_mapper"]
-    assert [params for _, params in chain] == [[0, 1], [0, 1], [], []]
+    def chain_of(dt, node):
+        chain, cells = [], cells_of(node.props["input-processors"])
+        while cells:
+            proc = dt.phandle2node[cells.pop(0)]
+            count = proc.props["#input-processor-cells"].to_num()
+            chain.append((proc, cells[:count]))
+            del cells[:count]
+        return chain
+
+    left_chain = chain_of(left, ls)
+    assert [n.name for n, _ in left_chain] == ["left_middle_click_mapper"]
+    assert [params for _, params in left_chain] == [[]]
+    central_chain = chain_of(right, listener)
+    assert [n.name for n, _ in central_chain] == [
+        "left_circle_volume", "left_touch_swipe", "left_wheel_blocker", "zip_xy_scaler"]
+    assert [params for _, params in central_chain] == [[], [], [0, 1], [0, 1]]
+    # Right pad: HWHEEL passes as horizontal scroll (no touch-swipe in its chain).
+    right_chain = [n.name for n, _ in chain_of(right, right.label2node["tps43_listener"])]
+    assert right_chain == ["tps43_orientation", "tps43_three_finger_swipe",
+                           "tps43_touch_inertia"], right_chain
+    circle = central_chain[0][0]
+    assert circle.props["x-code"].to_num() == c["INPUT_REL_X"]
+    assert circle.props["y-code"].to_num() == c["INPUT_REL_Y"]
+    chain = left_chain + central_chain
 
     def process(kind, code, value, sync=True):
         # Model the pinned standard processors using the actual built properties.
         for node, params in chain:
+            compatible = node.props["compatible"].to_string()
+            if compatible == "zmk,input-processor-circle-keys":
+                continue  # Observes X/Y and touch only; never changes or stops events.
+            if compatible == "zmk,input-processor-touch-swipe":
+                if kind == rel and code == node.props["hwheel-code"].to_num():
+                    return None  # Always consumed; may tap Back/Forward instead.
+                continue
             if kind != node.props["type"].to_num():
                 continue
-            compatible = node.props["compatible"].to_string()
             if compatible == "zmk,input-processor-scaler":
                 if code in node.props["codes"].to_nums():
                     value = int(value * params[0] / params[1])
@@ -129,29 +153,24 @@ def main():
 
     rel, key = c["INPUT_EV_REL"], c["INPUT_EV_KEY"]
     for value in (-32768, -100, -1, 0, 1, 100, 32767):
-        for code in ("INPUT_REL_X", "INPUT_REL_Y", "INPUT_REL_HWHEEL"):
+        for code in ("INPUT_REL_X", "INPUT_REL_Y", "INPUT_REL_WHEEL"):
             assert process(rel, c[code], value) == (rel, c[code], 0, True)
-        assert process(rel, c["INPUT_REL_WHEEL"], value) == (
-            rel, c["INPUT_REL_HWHEEL"], value, True)
+        assert process(rel, c["INPUT_REL_HWHEEL"], value) is None
     for value in (0, 1):
         assert process(key, c["INPUT_BTN_1"], value) == (key, c["INPUT_BTN_2"], value, True)
         assert process(key, c["INPUT_BTN_0"], value) == (key, c["INPUT_BTN_0"], value, True)
     assert process(rel, c["INPUT_REL_X"], 25, False)[3] is False
-
-    # Model the shared HID reference count: left hold + right tap + movement.
-    count = 0
-    for value, expected in ((1, 1), (1, 2), (0, 1)):
-        assert process(key, c["INPUT_BTN_0"], value)[2] == value
-        count += 1 if value else -1
-        assert count == expected
-    for _ in range(100):
-        assert process(rel, c["INPUT_REL_X"], 5)[2] == 0
-        assert count == 1  # Right movement sends no button release.
-    count -= 1
-    assert count == 0
+    # X/Y cross BLE unchanged so the central circle processor sees real motion.
+    for code in ("INPUT_REL_X", "INPUT_REL_Y"):
+        value = 25
+        for node, params in left_chain:
+            if node.props["compatible"].to_string() == "zmk,input-processor-scaler" and \
+                    c[code] in node.props["codes"].to_nums():
+                value = int(value * params[0] / params[1])
+        assert value == 25, code
     print("PASS: built pins, gestures, split routing, roles, battery/sleep/Studio config")
-    print("PASS: processor order, signed motion blocking, wheel/button mapping, sync")
-    print("PASS: event model preserves left hold through movement and a right tap")
+    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, sync")
+    print("PASS: left X/Y reach the central volume circle and never move the cursor")
     print("Hardware/BLE/Deep Sleep acceptance tests remain manual.")
 
 
