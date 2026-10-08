@@ -22,6 +22,10 @@ struct touch_swipe_config {
     int32_t axis_ratio;
     uint32_t left_keycode;
     uint32_t right_keycode;
+    /* 0 disables vertical gestures (WHEEL is then only observed). */
+    uint32_t up_keycode;
+    uint32_t down_keycode;
+    int32_t vertical_threshold;
 };
 
 struct touch_swipe_data {
@@ -31,6 +35,8 @@ struct touch_swipe_data {
     int32_t vertical_accum;
     /* Total vertical travel prevents opposite scroll samples cancelling out. */
     int32_t vertical_travel;
+    /* Total horizontal travel guards vertical gestures the same way. */
+    int32_t horizontal_travel;
 };
 
 static int64_t magnitude(int32_t value) {
@@ -43,6 +49,17 @@ static int32_t bounded_add(int32_t accum, int64_t delta) {
 
 static void reset(struct touch_swipe_data *data) {
     *data = (struct touch_swipe_data){0};
+}
+
+static void tap(uint32_t keycode, const char *name) {
+    /* Latched by the caller before output: no failure may retrigger. */
+    int64_t timestamp = k_uptime_get();
+    int press = raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
+    int release = raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
+    if (press < 0 || release < 0) {
+        LOG_WRN("touch swipe key output failed: %d/%d", press, release);
+    }
+    LOG_DBG("touch swipe %s fired", name);
 }
 
 static int observe_input(const struct device *dev, struct input_event *event,
@@ -72,7 +89,15 @@ static int observe_input(const struct device *dev, struct input_event *event,
         if (data->touching && !data->swipe_fired) {
             data->vertical_accum = bounded_add(data->vertical_accum, event->value);
             data->vertical_travel = bounded_add(data->vertical_travel, magnitude(event->value));
+            int64_t vertical = magnitude(data->vertical_accum);
+            if (cfg->up_keycode && cfg->down_keycode && vertical >= cfg->vertical_threshold &&
+                vertical >= (int64_t)data->horizontal_travel * cfg->axis_ratio) {
+                data->swipe_fired = true;
+                bool up = data->vertical_accum > 0;
+                tap(up ? cfg->up_keycode : cfg->down_keycode, up ? "up" : "down");
+            }
         }
+        /* WHEEL passes on; a later processor decides whether it scrolls. */
         return ZMK_INPUT_PROC_CONTINUE;
     }
     if (event->code != cfg->hwheel_code) {
@@ -81,20 +106,14 @@ static int observe_input(const struct device *dev, struct input_event *event,
 
     if (data->touching && !data->swipe_fired) {
         data->horizontal_accum = bounded_add(data->horizontal_accum, event->value);
+        data->horizontal_travel = bounded_add(data->horizontal_travel, magnitude(event->value));
         int64_t horizontal = magnitude(data->horizontal_accum);
         if (horizontal >= cfg->threshold &&
             horizontal >= (int64_t)data->vertical_travel * cfg->axis_ratio) {
             /* Latch before output: neither reversal nor output failure may retrigger. */
             data->swipe_fired = true;
             bool left = data->horizontal_accum < 0;
-            uint32_t keycode = left ? cfg->left_keycode : cfg->right_keycode;
-            int64_t timestamp = k_uptime_get();
-            int press = raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
-            int release = raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
-            if (press < 0 || release < 0) {
-                LOG_WRN("touch swipe key output failed: %d/%d", press, release);
-            }
-            LOG_DBG("touch swipe %s fired", left ? "left" : "right");
+            tap(left ? cfg->left_keycode : cfg->right_keycode, left ? "left" : "right");
         }
     }
     /* Always suppress horizontal scrolling, including outside a tracked touch. */
@@ -110,6 +129,11 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
                  DT_INST_PROP(n, axis_ratio) <= INT32_MAX, "axis-ratio must be positive int32"); \
     BUILD_ASSERT(DT_INST_PROP(n, hwheel_code) != DT_INST_PROP(n, wheel_code),                      \
                  "horizontal and vertical codes must differ");                                   \
+    BUILD_ASSERT(DT_INST_PROP_OR(n, vertical_threshold, DT_INST_PROP(n, threshold)) > 0,          \
+                 "vertical-threshold must be positive");                                         \
+    BUILD_ASSERT((DT_INST_PROP_OR(n, up_keycode, 0) == 0) ==                                       \
+                     (DT_INST_PROP_OR(n, down_keycode, 0) == 0),                                 \
+                 "set both up-keycode and down-keycode, or neither");                            \
     static struct touch_swipe_data data_##n;                                                       \
     static const struct touch_swipe_config config_##n = {                                          \
         .hwheel_code = DT_INST_PROP(n, hwheel_code),                                               \
@@ -119,6 +143,10 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
         .axis_ratio = DT_INST_PROP(n, axis_ratio),                                                 \
         .left_keycode = DT_INST_PROP(n, left_keycode),                                             \
         .right_keycode = DT_INST_PROP(n, right_keycode),                                           \
+        .up_keycode = DT_INST_PROP_OR(n, up_keycode, 0),                                           \
+        .down_keycode = DT_INST_PROP_OR(n, down_keycode, 0),                                       \
+        .vertical_threshold =                                                                      \
+            DT_INST_PROP_OR(n, vertical_threshold, DT_INST_PROP(n, threshold)),                    \
     };                                                                                            \
     DEVICE_DT_INST_DEFINE(n, NULL, NULL, &data_##n, &config_##n, POST_KERNEL,                       \
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
