@@ -430,9 +430,15 @@ static void tps43_work_handler(struct k_work *work) {
      *   [5..6] REL_X           (0x0012, big-endian)
      *   [7..8] REL_Y           (0x0014, big-endian)
      */
-    uint8_t touch_data[(TPS43_REG_REL_Y + 2) - TPS43_REG_GESTURE_EVENTS_0];
-    ret = read_sequence_registers(dev, TPS43_REG_GESTURE_EVENTS_0, touch_data,
-                                  sizeof(touch_data));
+    /*
+     * Nickey44A soft pinch extends the same read through finger 2's position:
+     *   [9..10] ABS_X finger 1, [11..12] ABS_Y finger 1,
+     *   [16..17] ABS_X finger 2, [18..19] ABS_Y finger 2.
+     */
+    uint8_t touch_data[(TPS43_REG_ABS_Y_2 + 2) - TPS43_REG_GESTURE_EVENTS_0];
+    size_t touch_len = config->soft_pinch ? sizeof(touch_data)
+                                          : (size_t)((TPS43_REG_REL_Y + 2) - TPS43_REG_GESTURE_EVENTS_0);
+    ret = read_sequence_registers(dev, TPS43_REG_GESTURE_EVENTS_0, touch_data, touch_len);
     if (ret < 0) {
         LOG_ERR("Touch data read error: %d", ret);
         goto done;
@@ -465,6 +471,57 @@ static void tps43_work_handler(struct k_work *work) {
         drv_data->three_finger_session = true;
     } else if (num_fingers == 0) {
         drv_data->three_finger_session = false;
+    }
+
+    /*
+     * Nickey44A soft pinch: with exactly two fingers, a change of the distance
+     * between them (beyond soft-pinch-start-permille of the pad width) starts
+     * a pinch. From then until a finger lifts, the distance change is reported
+     * as REL_MISC (permille of X resolution, positive = fingers apart) and
+     * scrolling is suppressed. Parallel two-finger motion keeps the distance,
+     * so it stays a scroll.
+     */
+    bool pinch_consumes = false;
+    if (config->soft_pinch && drv_data->pinch_resolution == 0) {
+        /* Read inside the RDY window opened by this event. */
+        uint16_t x_res = 0;
+        if (tps43_i2c_read_reg16(dev, TPS43_REG_X_RESOLUTION, &x_res) < 0 || x_res == 0) {
+            x_res = 1000;
+        }
+        drv_data->pinch_resolution = x_res;
+        LOG_INF("Soft pinch resolution: %u", x_res);
+    }
+    if (config->soft_pinch && num_fingers == 2 && !drv_data->three_finger_session) {
+        int32_t x1 = (touch_data[9] << 8) | touch_data[10];
+        int32_t y1 = (touch_data[11] << 8) | touch_data[12];
+        int32_t x2 = (touch_data[16] << 8) | touch_data[17];
+        int32_t y2 = (touch_data[18] << 8) | touch_data[19];
+        float dx = (float)(x2 - x1);
+        float dy = (float)(y2 - y1);
+        int32_t dist = (int32_t)(sqrtf(dx * dx + dy * dy) * 1000.0f /
+                                 (float)drv_data->pinch_resolution);
+        if (!drv_data->pinch_tracking) {
+            drv_data->pinch_tracking = true;
+            drv_data->pinch_active = false;
+            drv_data->pinch_base = dist;
+            drv_data->pinch_last = dist;
+        } else if (!drv_data->pinch_active &&
+                   abs(dist - drv_data->pinch_base) >= config->soft_pinch_start_permille) {
+            drv_data->pinch_active = true;
+            LOG_INF("Soft pinch start (distance %d -> %d)", drv_data->pinch_base, dist);
+        }
+        if (drv_data->pinch_active) {
+            int32_t delta = dist - drv_data->pinch_last;
+            drv_data->pinch_last = dist;
+            if (delta != 0) {
+                LOG_INF("Soft pinch %d", delta);
+                input_report_rel(dev, INPUT_REL_MISC, delta, true, K_FOREVER);
+            }
+            pinch_consumes = true;
+        }
+    } else if (num_fingers != 2) {
+        drv_data->pinch_tracking = false;
+        drv_data->pinch_active = false;
     }
 
     if (gestures_events[0] != 0 || gestures_events[1] != 0) {
@@ -525,7 +582,9 @@ static void tps43_work_handler(struct k_work *work) {
         }
     }
 
-    if (rel_x != 0 || rel_y != 0) {
+    if (pinch_consumes) {
+        /* The pinch owns this two-finger contact: no scroll, zoom or cursor. */
+    } else if (rel_x != 0 || rel_y != 0) {
         if (num_fingers == 3 || drv_data->three_finger_session) {
             LOG_INF("Three-finger movement - checking for swipe");
             tps43_handle_swipe(dev, 3, rel_x, rel_y);
@@ -1087,6 +1146,11 @@ static int check_reset_and_reconfigure(const struct device *dev) {
         return ret;
     }
 
+    /* Nickey44A soft pinch: re-read the X resolution in the next RDY window. */
+    drv_data->pinch_resolution = 0;
+    drv_data->pinch_tracking = false;
+    drv_data->pinch_active = false;
+
     drv_data->device_ready = true;
 
     return 0;
@@ -1497,6 +1561,8 @@ static int tps43_init(const struct device *dev) {
         .two_finger_tap = DT_INST_PROP(inst, two_finger_tap),                                        \
         .scroll = DT_INST_PROP(inst, scroll),                                                        \
         .zoom = DT_INST_PROP(inst, zoom),                                                            \
+        .soft_pinch = DT_INST_PROP(inst, soft_pinch),                                                \
+        .soft_pinch_start_permille = DT_INST_PROP(inst, soft_pinch_start_permille),                  \
         .swipes = DT_INST_PROP(inst, swipes),                                                        \
         .three_finger_swipe = DT_INST_PROP(inst, three_finger_swipe),                                \
         .three_finger_swipe_throttle_ms = DT_INST_PROP_OR(inst, three_finger_swipe_throttle_ms, 300),\

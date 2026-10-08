@@ -35,6 +35,8 @@ extern "C" {
 #define TPS43_REG_ABS_Y             0x0018  /* 2 bytes - absolute Y position */
 #define TPS43_REG_TOUCH_STRENGTH    0x001A  /* 2 bytes */
 #define TPS43_REG_TOUCH_AREA        0x001C  /* 1 byte */
+#define TPS43_REG_ABS_X_2           0x001D  /* 2 bytes - finger 2 absolute X */
+#define TPS43_REG_ABS_Y_2           0x001F  /* 2 bytes - finger 2 absolute Y */
 
 
 /* System control and configuration */
@@ -209,6 +211,9 @@ struct tps43_config {
     bool two_finger_tap;
     bool scroll;
     bool zoom;
+    /* Nickey44A: pinch detected from the two finger positions (REL_MISC). */
+    bool soft_pinch;
+    int16_t soft_pinch_start_permille;
     bool swipes;
     bool three_finger_swipe;
     int16_t three_finger_swipe_throttle_ms;
@@ -280,6 +285,12 @@ struct tps43_drv_data {
     /* Nickey44A: left button held by drag lock after the finger lifted. */
     bool drag_locked;
     int64_t last_three_finger_swipe_ms;
+    /* Nickey44A soft pinch state (finger distance in permille of X resolution). */
+    uint16_t pinch_resolution;
+    bool pinch_tracking;
+    bool pinch_active;
+    int32_t pinch_base;
+    int32_t pinch_last;
 };
 
 /*
