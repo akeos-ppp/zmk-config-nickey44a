@@ -27,21 +27,23 @@ unchanged. Snipe still scales only cursor X/Y before the common chain.
 left-keycode/right-keycode are required encoded ZMK keycodes; Nickey44A sets
 C_AC_BACK/C_AC_FORWARD. The same keycode-state events used by &kp produce a
 press then release through ZMK's HID listener. Arbitrary behavior bindings
-are not implemented. No OS-specific shortcut or direct driver changes.
+are not implemented. Modifiers of an encoded keycode (e.g. LC(TAB)) are sent
+as separate key events: modifiers down, key down, key up, modifiers up.
 
 ## Tuning and hardware validation
 
-Nickey44A starts with threshold=8 and axis-ratio=2. The pinned TPS43 driver
-outputs only its dominant scroll axis per sample, truncated as movement *
-scroll-sensitivity / 100. At sensitivity=5, eight emitted units correspond
-to approximately 160 controller movement units before per-sample truncation.
-This is a starting candidate, not a measured physical distance or guarantee.
+Nickey44A uses threshold=160, vertical-threshold=120 and axis-ratio=2 with
+the left pad's scroll-sensitivity=100. The pinned TPS43 driver outputs only
+its dominant scroll axis per sample, truncated as movement *
+scroll-sensitivity / 100; at 100 nothing is truncated (at 5, samples under
+20 counts became 0 and slow vertical swipes never fired). These are starting
+candidates, not measured physical distances.
 The processor can observe only the selected, transformed axis; discarded
 diagonal components and future vertical motion cannot inform an earlier fire.
-Very slow movements can truncate to zero. Confirm direction on hardware.
+Confirm direction on hardware.
 
 Edit threshold and axis-ratio in nickey44a_r.overlay and rebuild the right
-firmware. Try threshold 12/16 for accidental fires, or 4/6 for shorter swipes;
+firmware. Try threshold 240/320 for accidental fires, or 80/120 for shorter swipes;
 axis-ratio 3 requires stronger horizontal dominance. Vertical-heavy touches
 may need release before a horizontal gesture, deliberately.
 
