@@ -121,7 +121,7 @@ def main():
     right_chain = [n.name for n, _ in chain_of(right, right.label2node["tps43_listener"])]
     assert right_chain == ["tps43_orientation", "tps43_three_finger_swipe",
                            "tps43_pinch_zoom", "tps43_touch_inertia"], right_chain
-    assert enabled(rt, "zoom")
+    assert enabled(rt, "soft-pinch") and not enabled(rt, "zoom")
     pinch = right.label2node["tps43_pinch_zoom"]
     assert pinch.props["zoom-code"].to_num() == c["INPUT_REL_MISC"]
     # Left pad scroll counts stay raw so slow swipes are not truncated to 0.
