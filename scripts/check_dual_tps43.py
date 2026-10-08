@@ -120,7 +120,12 @@ def main():
     # Right pad: HWHEEL passes as horizontal scroll (no touch-swipe in its chain).
     right_chain = [n.name for n, _ in chain_of(right, right.label2node["tps43_listener"])]
     assert right_chain == ["tps43_orientation", "tps43_three_finger_swipe",
-                           "tps43_touch_inertia"], right_chain
+                           "tps43_pinch_zoom", "tps43_touch_inertia"], right_chain
+    assert enabled(rt, "zoom")
+    pinch = right.label2node["tps43_pinch_zoom"]
+    assert pinch.props["zoom-code"].to_num() == c["INPUT_REL_MISC"]
+    # Left pad scroll counts stay raw so slow swipes are not truncated to 0.
+    assert lt.props["scroll-sensitivity"].to_num() == 100
     circle = central_chain[0][0]
     assert circle.props["x-code"].to_num() == c["INPUT_REL_X"]
     assert circle.props["y-code"].to_num() == c["INPUT_REL_Y"]
@@ -169,7 +174,7 @@ def main():
                 value = int(value * params[0] / params[1])
         assert value == 25, code
     print("PASS: built pins, gestures, split routing, roles, battery/sleep/Studio config")
-    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, WHEEL zeroed after tab switch, sync")
+    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, WHEEL zeroed after tab switch, sync, right pinch zoom")
     print("PASS: left X/Y reach the central volume circle and never move the cursor")
     print("Hardware/BLE/Deep Sleep acceptance tests remain manual.")
 
