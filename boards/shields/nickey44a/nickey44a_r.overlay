@@ -76,7 +76,9 @@
         hwheel-code = <INPUT_REL_HWHEEL>;
         wheel-code = <INPUT_REL_WHEEL>;
         touch-code = <INPUT_BTN_TOUCH>;
-        threshold = <8>;
+        /* Raw controller counts (left scroll-sensitivity = 100). */
+        threshold = <160>;
+        vertical-threshold = <120>;
         axis-ratio = <2>;
         left-keycode = <C_AC_BACK>;
         right-keycode = <C_AC_FORWARD>;
@@ -142,6 +144,22 @@
         click-suppress-ms = <150>;
     };
 
+    /*
+     * Right pad: two-finger pinch zooms (fingers apart = Cmd+=, together =
+     * Cmd+-), one tap per `step` zoom units, repeating while pinching. If the
+     * direction is reversed on hardware, swap the two keycodes; raise `step`
+     * for fewer zoom steps per pinch.
+     */
+    tps43_pinch_zoom: tps43_pinch_zoom {
+        compatible = "zmk,input-processor-pinch-keys";
+        #input-processor-cells = <0>;
+        zoom-code = <INPUT_REL_MISC>;
+        touch-code = <INPUT_BTN_TOUCH>;
+        step = <120>;
+        zoom-in-keycode = <LG(EQUAL)>;
+        zoom-out-keycode = <LG(MINUS)>;
+    };
+
     tps43_touch_inertia: tps43_touch_inertia {
         compatible = "zmk,input-processor-touch-inertia";
         #input-processor-cells = <0>;
@@ -162,7 +180,8 @@
         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
                                              INPUT_TRANSFORM_X_INVERT |
                                              INPUT_TRANSFORM_Y_INVERT)>,
-                           <&tps43_three_finger_swipe>, <&tps43_touch_inertia>;
+                           <&tps43_three_finger_swipe>, <&tps43_pinch_zoom>,
+                           <&tps43_touch_inertia>;
 
         snipe_layer {
             layers = <1>;
@@ -197,6 +216,8 @@
         drag-lock;
         two-finger-tap;
         scroll;
+        /* Pinch: the driver reports the zoom amount as REL_MISC (tps43_pinch_zoom). */
+        zoom;
         /* One driver event per three-finger sample; the processor fires once per touch. */
         three-finger-swipe;
         three-finger-swipe-throttle-ms = <0>;

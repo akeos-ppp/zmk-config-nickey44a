@@ -85,7 +85,12 @@
         filter-settings = <0x0B>;
         filter-dynamic-bottom = <5>;
         sensitivity = <100>;
-        scroll-sensitivity = <5>;
+        /*
+         * The left pad never scrolls: WHEEL/HWHEEL only feed the central's
+         * swipe detector. 100 keeps raw counts, so slow two-finger motion is
+         * not truncated to 0 (at 5, any sample under 20 counts was lost).
+         */
+        scroll-sensitivity = <100>;
         enable-power-management;
         /* Keep physical vertical motion on WHEEL: no controller XY swap. */
         invert-x;
