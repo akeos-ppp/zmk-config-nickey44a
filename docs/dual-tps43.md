@@ -1,31 +1,39 @@
 # Nickey44A-PAD: 左右TPS43
 
 右central／左peripheral。左右ともSDA=P0.09、SCL=P0.10、RDY=P1.10、
-NRST=P0.16、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるため、
+NRST=左P0.16／右P1.00、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるため、
 アドレスは同じでよい。westのrevision、ZMK本体、Azoteqドライバーは変更しない。
 
 ## イベント経路
 
 ```text
 左TPS43 → 左input-splitの標準processors → BLE split (reg=0)
-        → 右input-split proxy (reg=0) → 左専用input-listener → 共通HID
-右TPS43 → 既存の右input-listener → 既存orientation/swipe/inertia/Snipe → 共通HID
+        → 右input-split proxy (reg=0) → 左専用input-listener
+        → 音量サークル検出 → 二本指左右で戻る/進む → WHEEL・X/Y 0化 → 共通HID
+右TPS43 → 右input-listener → orientation → 三本指ジェスチャー → inertia/Snipe → 共通HID
 ```
 
 左のprocessor順序は次の通り。変換はすべてBLE転送前に行う。
 
 | 順序 | Processor | 結果 |
 |---|---|---|
-| 1 | `zip_xy_scaler 0 1` | REL_X/Yを0化 |
-| 2 | `left_hwheel_blocker 0 1` | 元のREL_HWHEELを0化 |
-| 3 | `left_wheel_to_hwheel` | REL_WHEELをREL_HWHEELへ変換、値と符号は保持 |
-| 4 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
+| 1 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
 
-左TPS43の`invert-scroll-y`でWHEELの符号を反転してからHWHEELへ変換する。
-上下スワイプによる水平スクロール方向は、初期のデュアルTPS43設定と逆になる。
+REL_X/Y、WHEEL、HWHEELは変換せずに転送する。右の左専用listenerは
+次の順で処理する。
 
-BTN_0は変換しない。左はsingle-tapを有効にせず、press-and-hold、
-two-finger-tap、scrollのみ有効。hold-time=80ms。
+| 順序 | Processor | 結果 |
+|---|---|---|
+| 1 | `left_circle_volume` | 一本指の回転で音量（時計回り=アップ、45度ごと） |
+| 2 | `left_touch_swipe` | 二本指左右スワイプ1回で戻る/進む、HWHEELは常に破棄 |
+| 3 | `left_wheel_blocker 0 1` | 二本指上下（WHEEL）を0化 |
+| 4 | `zip_xy_scaler 0 1` | X/Yを0化、左パッドでカーソルは動かない |
+
+右パッドの二本指左右スワイプはtouch-swipeを通さず、そのまま横スクロールになる。
+
+
+BTN_0は変換しない。左はsingle-tapとpress-and-holdを有効にせず、
+two-finger-tapとscrollのみ有効。一本指の動きは音量サークル専用。
 標準scalerはイベントを破棄せず値を0にするため、X/Yと元HWHEELの
 BLE通知件数は減らない。sync情報もそのまま転送される。
 
@@ -35,7 +43,8 @@ invert-xは維持する。左に追加のorientation processorはない。
 同じ物理向きの実装を前提とした設定であり、左の取り付け向きと実機の
 上下・左右判定は下記手順で確認する。
 
-右TPS43の変更はpress-and-holdの削除だけ。既存のタップ、スクロール、
+右TPS43はpress-and-holdとdrag-lock（離しても押下維持、次のタップで解除）、
+三本指スワイプ／タップを有効にしている。既存のタップ、スクロール、
 swipe、inertia、orientation、Layer 1 Snipe、感度、電源管理、RST/RDYは維持。
 固定ZMKのHIDはボタン押下をカウントするため、右の移動イベントは左の
 BTN_0保持を解除しない。左保持中の右タップも、タップ終了後に左の押下が残る。
