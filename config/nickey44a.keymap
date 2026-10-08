@@ -42,17 +42,17 @@
         };
 
         c_d {
-            bindings = <&kp LA(F)>;
+            bindings = <&kp LA(LC(F))>;
             key-positions = <25 26>;
         };
 
         r_d {
-            bindings = <&kp LA(G)>;
+            bindings = <&kp LA(LC(G))>;
             key-positions = <26 27>;
         };
 
         f_d {
-            bindings = <&kp LA(ENTER)>;
+            bindings = <&kp LA(LC(ENTER))>;
             key-positions = <27 28>;
         };
 
@@ -62,7 +62,7 @@
         };
 
         r_d2 {
-            bindings = <&kp LA(T)>;
+            bindings = <&kp LA(LC(T))>;
             key-positions = <38 38 39>;
         };
 
