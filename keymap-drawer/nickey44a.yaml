@@ -26,7 +26,7 @@ layers:
   - L
   - {t: '-', h: '='}
   - {t: Z, h: LSHFT}
-  - Z
+  - X
   - C
   - V
   - B
@@ -39,12 +39,12 @@ layers:
   - {t: ',', h: ;}
   - {t: ., h: ''''}
   - {t: /, h: RIGHT SHIFT}
-  - {t: '"', h: LCTRL}
+  - LCTRL
   - {t: SPACE, h: '2'}
   - BACKSPACE
   - {t: CAPSLOCK, h: RIGHT COMMAND}
   - {t: ENTER, h: '1'}
-  - {t: '@', h: RALT}
+  - RIGHT ALT
   '1':
   - '1'
   - '2'
@@ -192,14 +192,14 @@ combos:
 - p: [24, 25]
   k: Alt+Ctl+D
 - p: [25, 26]
-  k: Sft+Alt+F
+  k: Alt+F
 - p: [26, 27]
-  k: Sft+Alt+G
+  k: Alt+G
 - p: [27, 28]
-  k: Sft+Alt+ENTER
+  k: Alt+ENTER
 - p: [37, 36]
   k: Sft+Gui+4
 - p: [38, 38, 39]
-  k: Sft+Alt+T
+  k: Alt+T
 - p: [38, 39, 40]
   k: {t: '3', h: toggle}
