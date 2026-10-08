@@ -50,3 +50,14 @@ duplicate down, complete release/re-touch, tap/right-click, single-finger
 cursor/tap/hold, repeated vertical scrolling and inertia, layer-1 Snipe,
 deep sleep/wake, and USB/BLE Consumer reports in the target browser.
 Build success does not establish physical gesture feel or sleep behavior.
+
+## Optional vertical swipe
+
+up-keycode/down-keycode (set both or neither) tap once per complete touch on a
+positive/negative WHEEL swipe, using vertical-threshold (default: threshold)
+and the same axis-ratio against total horizontal travel. Horizontal and
+vertical share one latch, so a touch fires at most one gesture. WHEEL still
+passes unchanged; Nickey44A zeroes it afterwards with a scaler. Nickey44A sets
+LC(LS(TAB))/LC(TAB) for previous/next browser tab. The driver's
+invert-scroll-y decides which physical direction is positive; confirm on
+hardware and swap the keycodes if needed.
