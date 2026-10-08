@@ -39,12 +39,12 @@ layers:
   - {t: ',', h: ;}
   - {t: ., h: ''''}
   - {t: /, h: RIGHT SHIFT}
-  - {t: '"', h: LCTRL}
+  - LCTRL
   - {t: SPACE, h: '2'}
   - BACKSPACE
   - {t: CAPSLOCK, h: RIGHT COMMAND}
   - {t: ENTER, h: '1'}
-  - {t: '@', h: RALT}
+  - RIGHT ALT
   '1':
   - '1'
   - '2'
