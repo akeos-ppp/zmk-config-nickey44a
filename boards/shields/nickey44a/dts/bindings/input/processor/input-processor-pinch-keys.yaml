@@ -1,0 +1,24 @@
+description: Turns TPS43 pinch (zoom gesture) motion into repeated zoom-in/zoom-out key taps
+compatible: "zmk,input-processor-pinch-keys"
+include: ip_zero_param.yaml
+properties:
+  zoom-code:
+    type: int
+    required: true
+    description: Relative code carrying the driver's signed zoom amount (INPUT_REL_MISC).
+  touch-code:
+    type: int
+    required: true
+    description: Key code reported on touch down/up; release clears the accumulator.
+  step:
+    type: int
+    default: 60
+    description: Positive zoom units per key tap. Larger means fewer zoom steps per pinch.
+  zoom-in-keycode:
+    type: int
+    required: true
+    description: Encoded ZMK keycode tapped per step of positive zoom (fingers apart).
+  zoom-out-keycode:
+    type: int
+    required: true
+    description: Encoded ZMK keycode tapped per step of negative zoom (fingers together).
