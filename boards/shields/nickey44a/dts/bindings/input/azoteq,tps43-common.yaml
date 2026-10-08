@@ -124,6 +124,23 @@ properties:
     required: false
     description: Enable zoom gesture (pinch-to-zoom)
 
+  soft-pinch:
+    type: boolean
+    required: false
+    description: >
+      Nickey44A: detect pinch from the two finger positions instead of the
+      controller's zoom gesture. Reports the finger distance change as
+      INPUT_REL_MISC in permille of the X resolution (positive = apart) and
+      suppresses scrolling for the rest of that two-finger contact.
+
+  soft-pinch-start-permille:
+    type: int
+    required: false
+    default: 80
+    description: >
+      Distance change (permille of X resolution) that starts a soft pinch.
+      Larger values make an accidental pinch while scrolling less likely.
+
   swipes:
     type: boolean
     required: false
