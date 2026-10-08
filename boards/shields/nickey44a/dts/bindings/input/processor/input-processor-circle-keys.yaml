@@ -1,0 +1,36 @@
+description: Tap a ZMK keycode for each step of circular one-finger motion
+compatible: "zmk,input-processor-circle-keys"
+include: ip_zero_param.yaml
+properties:
+  x-code:
+    type: int
+    required: true
+  y-code:
+    type: int
+    required: true
+  touch-code:
+    type: int
+    required: true
+  segment-distance:
+    type: int
+    default: 12
+    description: Positive motion length, in REL units, accumulated into one direction segment.
+  step-degrees:
+    type: int
+    default: 45
+    description: Positive accumulated turning angle per keycode tap.
+  max-turn-degrees:
+    type: int
+    default: 90
+    description: A larger turn between two segments is treated as a corner or jitter and ignored.
+  idle-reset-ms:
+    type: int
+    default: 200
+    description: Motion gap after which direction history restarts.
+  clockwise-keycode:
+    type: int
+    required: true
+    description: Encoded ZMK keycode tapped per clockwise step (X right, Y down).
+  counterclockwise-keycode:
+    type: int
+    required: true
