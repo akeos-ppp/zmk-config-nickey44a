@@ -11,6 +11,9 @@
 #include <limits.h>
 #include <drivers/input_processor.h>
 #include <zmk/events/keycode_state_changed.h>
+#include <dt-bindings/zmk/hid_usage.h>
+#include <dt-bindings/zmk/hid_usage_pages.h>
+#include <dt-bindings/zmk/modifiers.h>
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -51,13 +54,43 @@ static void reset(struct touch_swipe_data *data) {
     *data = (struct touch_swipe_data){0};
 }
 
+static void raise_key(uint32_t encoded, bool pressed, int64_t timestamp, int *err) {
+    int ret = raise_zmk_keycode_state_changed_from_encoded(encoded, pressed, timestamp);
+    if (ret < 0) {
+        *err = ret;
+    }
+}
+
+static uint32_t modifier_usage(int bit) {
+    uint32_t id = HID_USAGE_KEY_KEYBOARD_LEFTCONTROL + bit;
+    return ZMK_HID_USAGE(HID_USAGE_KEY, id);
+}
+
 static void tap(uint32_t keycode, const char *name) {
-    /* Latched by the caller before output: no failure may retrigger. */
+    /*
+     * Latched by the caller before output: no failure may retrigger.
+     * Modifiers of a combo such as LC(TAB) are sent as their own key events
+     * around the base key (Ctrl down, Tab down, Tab up, Ctrl up), so the host
+     * sees the modifier before the key, as with a physical shortcut.
+     */
     int64_t timestamp = k_uptime_get();
-    int press = raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
-    int release = raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
-    if (press < 0 || release < 0) {
-        LOG_WRN("touch swipe key output failed: %d/%d", press, release);
+    uint8_t mods = SELECT_MODS(keycode);
+    uint32_t base = STRIP_MODS(keycode);
+    int err = 0;
+    for (int i = 0; i < 8; i++) {
+        if (mods & BIT(i)) {
+            raise_key(modifier_usage(i), true, timestamp, &err);
+        }
+    }
+    raise_key(base, true, timestamp, &err);
+    raise_key(base, false, timestamp, &err);
+    for (int i = 7; i >= 0; i--) {
+        if (mods & BIT(i)) {
+            raise_key(modifier_usage(i), false, timestamp, &err);
+        }
+    }
+    if (err < 0) {
+        LOG_WRN("touch swipe key output failed: %d", err);
     }
     LOG_DBG("touch swipe %s fired", name);
 }
