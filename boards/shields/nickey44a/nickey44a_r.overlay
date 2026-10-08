@@ -155,7 +155,8 @@
         #input-processor-cells = <0>;
         zoom-code = <INPUT_REL_MISC>;
         touch-code = <INPUT_BTN_TOUCH>;
-        step = <120>;
+        /* Permille of pad width per zoom tap. */
+        step = <100>;
         zoom-in-keycode = <LG(EQUAL)>;
         zoom-out-keycode = <LG(MINUS)>;
     };
@@ -216,8 +217,14 @@
         drag-lock;
         two-finger-tap;
         scroll;
-        /* Pinch: the driver reports the zoom amount as REL_MISC (tps43_pinch_zoom). */
-        zoom;
+        /*
+         * Pinch: the driver measures the distance between the two fingers
+         * itself (the controller's zoom gesture did not work on this pad)
+         * and reports its change as REL_MISC for tps43_pinch_zoom.
+         * Raise soft-pinch-start-permille if scrolling turns into zoom.
+         */
+        soft-pinch;
+        soft-pinch-start-permille = <80>;
         /* One driver event per three-finger sample; the processor fires once per touch. */
         three-finger-swipe;
         three-finger-swipe-throttle-ms = <0>;
