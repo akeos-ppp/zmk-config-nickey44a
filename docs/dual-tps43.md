@@ -10,7 +10,7 @@ NRST=左P0.16／右P1.00、I2Cアドレス=0x74。各MCUに独立したI2Cバス
 左TPS43 → 左input-splitの標準processors → BLE split (reg=0)
         → 右input-split proxy (reg=0) → 左専用input-listener
         → 音量サークル検出 → 二本指左右で戻る/進む・上下でタブ切替 → WHEEL・X/Y 0化 → 共通HID
-右TPS43 → 右input-listener → orientation → 三本指ジェスチャー → inertia/Snipe → 共通HID
+右TPS43 → 右input-listener → orientation → 三本指ジェスチャー → ピンチズーム → inertia/Snipe → 共通HID
 ```
 
 左のprocessor順序は次の通り。変換はすべてBLE転送前に行う。
@@ -30,6 +30,13 @@ REL_X/Y、WHEEL、HWHEELは変換せずに転送する。右の左専用listener
 | 4 | `zip_xy_scaler 0 1` | X/Yを0化、左パッドでカーソルは動かない |
 
 右パッドの二本指左右スワイプはtouch-swipeを通さず、そのまま横スクロールになる。
+右パッドのピンチ（ドライバーのzoomジェスチャー、REL_MISC）は`tps43_pinch_zoom`が
+step（120）ごとにCmd+=（指を広げる）/Cmd+-（指を狭める）へ変換し、REL_MISCは破棄する。
+
+左パッドのscroll-sensitivityは100（生カウント）。5だと1サンプル20カウント未満の
+ゆっくりした二本指移動が0に切り捨てられ、上下スワイプが発火しなかった。
+touch-swipeのthresholdは160（左右）、vertical-thresholdは120（上下）。
+ショートカットの修飾キーは基本キーとは別のキーイベントとして先に押し、後に離す。
 
 
 BTN_0は変換しない。左はsingle-tapとpress-and-holdを有効にせず、
