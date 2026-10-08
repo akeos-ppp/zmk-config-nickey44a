@@ -1,0 +1,2 @@
+# Vendored TPS43 driver Kconfig (CONFIG_INPUT_TPS43).
+rsource "modules/zmk-driver-azoteq-tps43/Kconfig"

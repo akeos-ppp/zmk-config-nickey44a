@@ -29,3 +29,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Azoteq TPS43 ZMK driver
+
+`modules/zmk-driver-azoteq-tps43` is vendored and modified from [geeksville/zmk_driver_azoteq](https://github.com/geeksville/zmk_driver_azoteq), licensed under the MIT License. The full license text is in `modules/zmk-driver-azoteq-tps43/LICENSE`.
+
+Copyright (c) 2025 Mariano Uvalle
