@@ -50,8 +50,9 @@
             device = <&left_tps43>;
             /*
              * X/Y, WHEEL and HWHEEL are forwarded unchanged. The central turns
-             * one-finger circles into volume and two-finger left/right swipes
-             * into Back/Forward, then zeroes the rest: the left pad never
+             * one-finger circles into volume, two-finger left/right swipes
+             * into Back/Forward and up/down swipes into tab switching, then
+             * zeroes the rest: the left pad never
              * moves the cursor or scrolls.
              */
             input-processors = <&left_middle_click_mapper>;
@@ -78,7 +79,7 @@
         /* No press-and-hold: one-finger motion is the volume circle. */
         two-finger-tap;
         scroll;
-        /* Vertical two-finger scroll is blocked on the central; kept for reference. */
+        /* Vertical two-finger motion becomes tab switching on the central. */
         invert-scroll-y;
 
         filter-settings = <0x0B>;
