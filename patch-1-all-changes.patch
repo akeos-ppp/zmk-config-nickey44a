@@ -1,0 +1,4555 @@
+From 133219d438a4a9c30abfa3d1a2508462babc327f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:12:49 +0900
+Subject: [PATCH 1/7] Add three-finger swipe gestures to right TPS43
+
+Vendor the geeksville TPS43 driver so three-finger samples report only the
+dominant axis, and add a processor that fires one action per touch:
+up/down = Mission Control (Ctrl+Up), left/right = adjacent Space.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ CMakeLists.txt                                |    3 +
+ Kconfig                                       |    2 +
+ THIRD_PARTY_NOTICES.md                        |    6 +
+ .../bindings/input/azoteq,tps43-common.yaml   |  427 +++++
+ .../dts/bindings/input/azoteq,tps43-i2c.yaml  |    6 +
+ .../input-processor-three-finger-swipe.yaml   |   41 +
+ boards/shields/nickey44a/nickey44a_r.overlay  |   29 +-
+ config/west.yml                               |    5 -
+ .../zmk-driver-azoteq-tps43/CMakeLists.txt    |    4 +
+ modules/zmk-driver-azoteq-tps43/Kconfig       |   19 +
+ modules/zmk-driver-azoteq-tps43/LICENSE       |   21 +
+ modules/zmk-driver-azoteq-tps43/README.md     |   19 +
+ modules/zmk-driver-azoteq-tps43/src/tps43.c   | 1537 +++++++++++++++++
+ modules/zmk-driver-azoteq-tps43/src/tps43.h   |  282 +++
+ .../src/tps43_idle_sleeper.c                  |   81 +
+ .../CMakeLists.txt                            |    1 +
+ .../README.md                                 |   26 +
+ .../input-processor-three-finger-swipe.yaml   |   41 +
+ .../src/input_processor_three_finger_swipe.c  |  130 ++
+ zephyr/module.yml                             |    1 +
+ 20 files changed, 2675 insertions(+), 6 deletions(-)
+ create mode 100644 Kconfig
+ create mode 100644 boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
+ create mode 100644 boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-i2c.yaml
+ create mode 100644 boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+ create mode 100644 modules/zmk-driver-azoteq-tps43/CMakeLists.txt
+ create mode 100644 modules/zmk-driver-azoteq-tps43/Kconfig
+ create mode 100644 modules/zmk-driver-azoteq-tps43/LICENSE
+ create mode 100644 modules/zmk-driver-azoteq-tps43/README.md
+ create mode 100644 modules/zmk-driver-azoteq-tps43/src/tps43.c
+ create mode 100644 modules/zmk-driver-azoteq-tps43/src/tps43.h
+ create mode 100644 modules/zmk-driver-azoteq-tps43/src/tps43_idle_sleeper.c
+ create mode 100644 modules/zmk-input-processor-three-finger-swipe/CMakeLists.txt
+ create mode 100644 modules/zmk-input-processor-three-finger-swipe/README.md
+ create mode 100644 modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+ create mode 100644 modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a6bd307..00ecadd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,3 +1,6 @@
+ # Bundled until the standalone touch-inertia module is published and SHA-pinned.
+ add_subdirectory(modules/zmk-input-processor-touch-inertia)
+ add_subdirectory(modules/zmk-input-processor-touch-swipe)
++# Vendored TPS43 driver (replaces the geeksville west project; see its README).
++add_subdirectory(modules/zmk-driver-azoteq-tps43)
++add_subdirectory(modules/zmk-input-processor-three-finger-swipe)
+diff --git a/Kconfig b/Kconfig
+new file mode 100644
+index 0000000..2407d5c
+--- /dev/null
++++ b/Kconfig
+@@ -0,0 +1,2 @@
++# Vendored TPS43 driver Kconfig (CONFIG_INPUT_TPS43).
++rsource "modules/zmk-driver-azoteq-tps43/Kconfig"
+diff --git a/THIRD_PARTY_NOTICES.md b/THIRD_PARTY_NOTICES.md
+index 9b0b4c6..8ff34fb 100644
+--- a/THIRD_PARTY_NOTICES.md
++++ b/THIRD_PARTY_NOTICES.md
+@@ -29,3 +29,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
+ ```
++
++## Azoteq TPS43 ZMK driver
++
++`modules/zmk-driver-azoteq-tps43` is vendored and modified from [geeksville/zmk_driver_azoteq](https://github.com/geeksville/zmk_driver_azoteq), licensed under the MIT License. The full license text is in `modules/zmk-driver-azoteq-tps43/LICENSE`.
++
++Copyright (c) 2025 Mariano Uvalle
+diff --git a/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
+new file mode 100644
+index 0000000..6ad1e04
+--- /dev/null
++++ b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
+@@ -0,0 +1,427 @@
++properties:
++  rdy-gpios:
++    type: phandle-array
++    required: false
++    description: GPIO pin for RDY interrupt signal (Ready)
++
++  rst-gpios:
++    type: phandle-array
++    required: false
++    description: GPIO pin for RST reset signal (Reset)
++
++  filter-settings:
++    type: int
++    default: 0x0F
++    description: |
++      Bit definitions:
++      - Bit 0 (0x01): IIR filter - infinite impulse response filter for
++        coordinate smoothing. Reduces high-frequency noise and jitter.
++      - Bit 1 (0x02): MAV filter - moving average filter for coordinate
++        stabilization. Removes outliers and averages recent measurements.
++      - Bit 2 (0x04): IIR select - When set, uses fixed IIR coefficient.
++        When clear (default), uses dynamic IIR that adapts to movement speed.
++      - Bit 3 (0x08): ALP count filter - Adaptive Learning Process filter
++        for noise suppression. Filters unwanted touch events based on learned patterns.
++      
++      Common configurations:
++      - 0x0B: IIR + MAV + ALP enabled, dynamic IIR.
++        Good balance of stability and responsiveness.
++      - 0x0F (default): All filters enabled including fixed IIR select.
++        Maximum smoothing, may introduce increased latency.
++      - 0x03: IIR + MAV only. Basic smoothing without ALP filtering.
++      - 0x01: IIR only. Minimal filtering, lowest latency.
++      - 0x00: All filters disabled. Raw sensor data, may have noise.
++      
++      Values can be combined using bitwise OR (e.g., 0x01 | 0x02 = 0x03).
++      
++  filter-dynamic-bottom:
++    type: int
++    required: false
++    description: |
++      XY dynamic filter bottom beta
++      Controls the minimum filtering applied to touch coordinates.
++      Lower values reduce smoothing at low speeds, improving responsiveness.
++      See datasheet section 5.9.2.1. Only written if explicitly set.
++
++  filter-dynamic-lower:
++    type: int
++    required: false
++    description: |
++      XY dynamic filter lower speed threshold 
++      Defines the speed below which the bottom beta filter coefficient is used.
++      Only written if explicitly set.
++
++  filter-dynamic-upper:
++    type: int
++    required: false
++    description: |
++      XY dynamic filter upper speed threshold 
++      Defines the speed above which maximum filtering is applied.
++      Only written if explicitly set.
++
++  x-resolution:
++    type: int
++    required: false
++    description: |
++      X axis resolution in pixels
++      Sets the trackpad X resolution. Only written if explicitly set.
++
++  y-resolution:
++    type: int
++    required: false
++    description: |
++      Y axis resolution in pixels
++      Sets the trackpad Y resolution. Only written if explicitly set.
++
++  sensitivity:
++    type: int
++    required: false
++    default: 100
++    description: Touch sensitivity percentage (100 = normal, higher = more sensitive)
++
++  scroll-sensitivity:
++    type: int
++    required: false
++    default: 50
++    description: Scroll sensitivity percentage (100 = normal, higher = more sensitive)
++
++  zoom-sensitivity:
++    type: int
++    required: false
++    default: 100
++    description: Zoom sensitivity percentage (100 = normal, higher = more sensitive)
++
++  enable-power-management:
++    type: boolean
++    required: false
++    description: Enable automatic power management (suspend/resume)
++
++  idle-sleep:
++    type: boolean
++    required: false
++    description: |
++      If set, the trackpad is put to sleep when ZMK transitions to the IDLE
++      activity state. If not set (default), only the SLEEP activity state puts
++      the trackpad to sleep; IDLE leaves the trackpad active.
++
++  single-tap:
++    type: boolean
++    required: false
++    description: Enable single tap gesture
++
++  two-finger-tap:
++    type: boolean
++    required: false
++    description: Enable two-finger tap gesture
++
++  scroll:
++    type: boolean
++    required: false
++    description: Enable scroll gesture
++
++  zoom:
++    type: boolean
++    required: false
++    description: Enable zoom gesture (pinch-to-zoom)
++
++  swipes:
++    type: boolean
++    required: false
++    description: Enable swipe processing. When enabled, tracks swipes as INPUT_BTN_NORTH/SOUTH/EAST/WEST.
++
++  three-finger-swipe:
++    type: boolean
++    required: false
++    description: >
++      Enable three-finger-only swipe processing, tracked as INPUT_BTN_NORTH/SOUTH/EAST/WEST.
++      Independent of `swipes`, so a three-finger swipe can be enabled without also enabling
++      single-finger swipe.
++
++  three-finger-swipe-throttle-ms:
++    type: int
++    required: false
++    default: 300
++    description: >
++      Minimum time in milliseconds between consecutive three-finger swipe actuations.
++      Unlike the single-finger swipe (a single hardware-gated gesture event), a
++      three-finger swipe is derived from raw movement deltas reported on every touch
++      update while 3 fingers are down, so a single continuous swipe motion can otherwise
++      fire the gesture many times in a row. Set to 0 to disable throttling.
++
++  switch-xy:
++    type: boolean
++    required: false
++    description: Swap X and Y axes
++
++  press-and-hold:
++    type: boolean
++    required: false
++    description: Enable press and hold gesture
++
++  invert-x:
++    type: boolean
++    description: If present, invert X coordinate values.
++      
++  invert-y:
++    type: boolean
++    description: If present, invert Y coordinate values.
++
++  invert-scroll-x:
++    type: boolean
++    description: If present, invert X scroll values.
++            
++  invert-scroll-y:
++    type: boolean
++    description: If present, invert Y scroll values.
++
++  swipe-initial-distance:
++    type: int
++    required: false
++    description: |
++      Swipe initial distance in pixels.
++      Sets the minimum distance a finger must travel to trigger a swipe gesture.
++      Written to the SWIPE_INITIAL_DISTANCE register (0x06C1).
++      Only written if explicitly set.
++
++  swipe-initial-time:
++    type: int
++    required: false
++    description: |
++      Swipe initial time in milliseconds.
++      Sets the maximum time allowed for the initial swipe movement.
++      Written to the SWIPE_INITIAL_TIME register (0x06BF).
++      Only written if explicitly set.
++
++  swipe-angle:
++    type: int
++    required: false
++    description: |
++      Swipe angle in degrees.
++      Sets the maximum deviation angle for a swipe gesture.
++      The value is specified in degrees and internally converted to
++      64*tan(angle) before writing to the SWIPE_ANGLE register (0x06C7).
++      Only written if explicitly set.
++
++  swipe-consecutive-distance:
++    type: int
++    required: false
++    description: |
++      Swipe consecutive distance in pixels.
++      Sets the distance threshold for consecutive swipe segments.
++      Written to the SWIPE_CONSECUTIVE_DISTANCE register (0x06C5).
++      Only written if explicitly set.
++
++  swipe-consecutive-time:
++    type: int
++    required: false
++    description: |
++      Swipe consecutive time in milliseconds.
++      Sets the time threshold for consecutive swipe segments.
++      Written to the SWIPE_CONSECUTIVE_TIME register (0x06C3).
++      Only written if explicitly set.
++
++  scroll-initial-distance:
++    type: int
++    required: false
++    description: |
++      Scroll initial distance in pixels.
++      Sets the minimum distance for a scroll gesture to trigger.
++      Written to the SCROLL_INITIAL_DISTANCE register (0x06C8).
++      Only written if explicitly set.
++
++  scroll-angle:
++    type: int
++    required: false
++    description: |
++      Scroll angle in degrees.
++      Sets the maximum deviation angle for a scroll gesture.
++      The value is specified in degrees and internally converted to
++      64*tan(angle) before writing to the SCROLL_ANGLE register (0x06CA).
++      Only written if explicitly set.
++
++  zoom-initial-distance:
++    type: int
++    required: false
++    description: |
++      Zoom initial distance in pixels.
++      Sets the minimum distance for a zoom gesture to trigger.
++      Written to the ZOOM_INITIAL_DISTANCE register (0x06CB).
++      Only written if explicitly set.
++
++  zoom-consecutive-distance:
++    type: int
++    required: false
++    description: |
++      Zoom consecutive distance in pixels.
++      Sets the distance threshold for consecutive zoom segments.
++      Written to the ZOOM_CONSECUTIVE_DISTANCE register (0x06CD).
++      Only written if explicitly set.
++
++  ati-target:
++    type: int
++    required: false
++    description: |
++      ATI target value (2 bytes).
++      Sets the target count for the ATI (Automatic Tuning Implementation) process.
++      Written to the ATI_TARGET register (0x056D).
++      Only written if explicitly set.
++
++  ref-drift-limit:
++    type: int
++    required: false
++    description: |
++      ATI reference drift limit (1 byte).
++      Controls the allowed drift of the reference level before re-ATI is triggered.
++      Written to the REF_DRIFT_LIMIT register (0x0571).
++      Only written if explicitly set.
++
++  reati-lower-limit:
++    type: int
++    required: false
++    description: |
++      Re-ATI lower count limit (1 byte).
++      Sets the lower threshold for triggering automatic re-ATI.
++      Written to the REATI_LOWER_LIMIT register (0x0573).
++      Only written if explicitly set.
++
++  reati-upper-limit:
++    type: int
++    required: false
++    description: |
++      Re-ATI upper count limit (1 byte).
++      Sets the upper threshold for triggering automatic re-ATI.
++      Written to the REATI_UPPER_LIMIT register (0x0574).
++      Only written if explicitly set.
++
++  max-count-limit:
++    type: int
++    required: false
++    description: |
++      ATI max count limit (2 bytes).
++      Sets the maximum count value allowed during ATI.
++      Written to the MAX_COUNT_LIMIT register (0x0575).
++      Only written if explicitly set.
++
++  ati-retry-time:
++    type: int
++    required: false
++    description: |
++      ATI retry time in seconds (1 byte).
++      Sets the minimum time between automatic re-ATI attempts.
++      Written to the ATI_RETRY_TIME register (0x0577).
++      Only written if explicitly set.
++
++  report-rate-active:
++    type: int
++    required: false
++    description: |
++      Report rate in active mode in milliseconds (2 bytes).
++      Controls how frequently the device reports data when actively touched.
++      Written to the REPORT_RATE_ACTIVE register (0x057A).
++      Only written if explicitly set.
++
++  report-rate-idle-touch:
++    type: int
++    required: false
++    description: |
++      Report rate in idle-touch mode in milliseconds (2 bytes).
++      Controls the reporting frequency when idle with touch contact.
++      Written to the REPORT_RATE_IDLE_TOUCH register (0x057C).
++      Only written if explicitly set.
++
++  report-rate-idle:
++    type: int
++    required: false
++    description: |
++      Report rate in idle mode in milliseconds (2 bytes).
++      Controls the reporting frequency in idle mode (no touch).
++      Written to the REPORT_RATE_IDLE register (0x057E).
++      Only written if explicitly set.
++
++  report-rate-lp1:
++    type: int
++    required: false
++    description: |
++      Report rate in low-power mode 1 in milliseconds (2 bytes).
++      Written to the REPORT_RATE_LP1 register (0x0580).
++      Only written if explicitly set.
++
++  report-rate-lp2:
++    type: int
++    required: false
++    description: |
++      Report rate in low-power mode 2 in milliseconds (2 bytes).
++      Written to the REPORT_RATE_LP2 register (0x0582).
++      Only written if explicitly set.
++
++  timeout-active:
++    type: int
++    required: false
++    description: |
++      Timeout for active mode in seconds (1 byte).
++      Time before transitioning from active to idle-touch mode.
++      Written to the TIMEOUT_ACTIVE register (0x0584).
++      Only written if explicitly set.
++
++  timeout-idle-touch:
++    type: int
++    required: false
++    description: |
++      Timeout for idle-touch mode in seconds (1 byte).
++      Time before transitioning from idle-touch to idle mode.
++      Written to the TIMEOUT_IDLE_TOUCH register (0x0585).
++      Only written if explicitly set.
++
++  timeout-idle:
++    type: int
++    required: false
++    description: |
++      Timeout for idle mode in seconds (1 byte).
++      Time before transitioning from idle to LP1 mode.
++      Written to the TIMEOUT_IDLE register (0x0586).
++      Only written if explicitly set.
++
++  timeout-lp1:
++    type: int
++    required: false
++    description: |
++      Timeout for low-power mode 1 in 20 sec units (1 byte). i.e. 3 means 60 seconds.
++      Time before transitioning from LP1 to LP2 mode.
++      Written to the TIMEOUT_LP1 register (0x0587).
++      Only written if explicitly set.
++
++  ref-update-time:
++    type: int
++    required: false
++    description: |
++      Reference update time in seconds (1 byte).
++      Controls how frequently the reference level is updated.
++      Written to the REF_UPDATE_TIME register (0x0588).
++      Only written if explicitly set.
++
++  tap-time:
++    type: int
++    required: false
++    description: |
++      Maximum time for a tap gesture in milliseconds (2 bytes).
++      Sets the maximum duration a finger can be in contact for a tap to register.
++      Written to the TAP_TIME register (0x06B9).
++      Only written if explicitly set.
++
++  tap-distance:
++    type: int
++    required: false
++    description: |
++      Maximum distance for a tap gesture in pixels (2 bytes).
++      Sets the maximum finger movement allowed during a tap gesture.
++      Written to the TAP_DISTANCE register (0x06BB).
++      Only written if explicitly set.
++
++  hold-time:
++    type: int
++    required: false
++    description: |
++      Minimum time for a press-and-hold gesture in milliseconds (2 bytes).
++      Sets the minimum duration a finger must be held to trigger a hold gesture.
++      Written to the HOLD_TIME register (0x06BD).
++      Only written if explicitly set.
+diff --git a/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-i2c.yaml b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-i2c.yaml
+new file mode 100644
+index 0000000..236ed90
+--- /dev/null
++++ b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-i2c.yaml
+@@ -0,0 +1,6 @@
++description: |
++  Azoteq TPS43 touchpad sensor driver over I2C interface
++
++compatible: "azoteq,tps43"
++
++include: ["i2c-device.yaml", "azoteq,tps43-common.yaml"]
+diff --git a/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+new file mode 100644
+index 0000000..dcda963
+--- /dev/null
++++ b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+@@ -0,0 +1,41 @@
++description: One four-way three-finger swipe per complete touch, with configurable ZMK keycodes
++compatible: "zmk,input-processor-three-finger-swipe"
++include: ip_zero_param.yaml
++properties:
++  touch-code:
++    type: int
++    required: true
++  left-code:
++    type: int
++    required: true
++    description: Input key code the driver reports for one physically leftward sample.
++  right-code:
++    type: int
++    required: true
++  up-code:
++    type: int
++    required: true
++  down-code:
++    type: int
++    required: true
++  threshold:
++    type: int
++    default: 3
++    description: Positive minimum net same-axis samples before firing.
++  axis-ratio:
++    type: int
++    default: 2
++    description: Positive ratio of net samples to the other axis's total samples.
++  left-keycode:
++    type: int
++    required: true
++    description: Encoded ZMK keycode tapped on a leftward swipe.
++  right-keycode:
++    type: int
++    required: true
++  up-keycode:
++    type: int
++    required: true
++  down-keycode:
++    type: int
++    required: true
+diff --git a/boards/shields/nickey44a/nickey44a_r.overlay b/boards/shields/nickey44a/nickey44a_r.overlay
+index 54c31ed..f8bbb55 100644
+--- a/boards/shields/nickey44a/nickey44a_r.overlay
++++ b/boards/shields/nickey44a/nickey44a_r.overlay
+@@ -70,6 +70,29 @@
+         right-keycode = <C_AC_FORWARD>;
+     };
+ 
++    /*
++     * Three-finger swipes (macOS): up/down = Mission Control, left/right =
++     * adjacent Space, following the trackpad convention (fingers left -> the
++     * Space to the right). The driver reports controller coordinates; with
++     * the measured orientation above, controller SOUTH = physical left,
++     * NORTH = right, EAST = up, WEST = down.
++     */
++    tps43_three_finger_swipe: tps43_three_finger_swipe {
++        compatible = "zmk,input-processor-three-finger-swipe";
++        #input-processor-cells = <0>;
++        touch-code = <INPUT_BTN_TOUCH>;
++        left-code = <INPUT_BTN_SOUTH>;
++        right-code = <INPUT_BTN_NORTH>;
++        up-code = <INPUT_BTN_EAST>;
++        down-code = <INPUT_BTN_WEST>;
++        threshold = <3>;
++        axis-ratio = <2>;
++        left-keycode = <LC(RIGHT)>;
++        right-keycode = <LC(LEFT)>;
++        up-keycode = <LC(UP)>;
++        down-keycode = <LC(UP)>;
++    };
++
+     tps43_touch_inertia: tps43_touch_inertia {
+         compatible = "zmk,input-processor-touch-inertia";
+         #input-processor-cells = <0>;
+@@ -90,7 +113,8 @@
+         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
+                                              INPUT_TRANSFORM_X_INVERT |
+                                              INPUT_TRANSFORM_Y_INVERT)>,
+-                           <&tps43_touch_swipe>, <&tps43_touch_inertia>;
++                           <&tps43_three_finger_swipe>, <&tps43_touch_swipe>,
++                           <&tps43_touch_inertia>;
+ 
+         snipe_layer {
+             layers = <1>;
+@@ -119,6 +143,9 @@
+         single-tap;
+         two-finger-tap;
+         scroll;
++        /* One driver event per three-finger sample; the processor fires once per touch. */
++        three-finger-swipe;
++        three-finger-swipe-throttle-ms = <0>;
+         /* The listener swaps axes, so driver X controls host vertical scrolling. */
+         invert-scroll-y;
+ 
+diff --git a/config/west.yml b/config/west.yml
+index d1050f6..f4f4e13 100644
+--- a/config/west.yml
++++ b/config/west.yml
+@@ -6,8 +6,6 @@ manifest:
+       url-base: https://github.com/cormoran
+     - name: caksoylar  # <-- RGB LED
+       url-base: https://github.com/caksoylar
+-    - name: geeksville
+-      url-base: https://github.com/geeksville
+   projects:
+     - name: zmk
+       remote: cormoran
+@@ -16,8 +14,5 @@ manifest:
+     - name: zmk-rgbled-widget
+       remote: caksoylar
+       revision: 8756cb7b8114069fa3c25c6f6c990f24988fceff # v0.3
+-    - name: zmk_driver_azoteq
+-      remote: geeksville
+-      revision: 66d510249d139569a4060c35bd78c6a2159f83ed
+   self:
+     path: config
+diff --git a/modules/zmk-driver-azoteq-tps43/CMakeLists.txt b/modules/zmk-driver-azoteq-tps43/CMakeLists.txt
+new file mode 100644
+index 0000000..0e3726f
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/CMakeLists.txt
+@@ -0,0 +1,4 @@
++target_sources_ifdef(CONFIG_INPUT_TPS43 app PRIVATE
++    ${CMAKE_CURRENT_LIST_DIR}/src/tps43.c
++    ${CMAKE_CURRENT_LIST_DIR}/src/tps43_idle_sleeper.c
++)
+diff --git a/modules/zmk-driver-azoteq-tps43/Kconfig b/modules/zmk-driver-azoteq-tps43/Kconfig
+new file mode 100644
+index 0000000..41342c2
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/Kconfig
+@@ -0,0 +1,19 @@
++config INPUT_TPS43
++    bool "Azoteq TPS43 I2C Touchpad Input Device"
++    default y
++    depends on DT_HAS_AZOTEQ_TPS43_ENABLED
++    depends on I2C
++    depends on INPUT
++    help
++      Enable driver for Azoteq touchpad input device over I2C interface.
++      Supports multitouch gestures, scrolling, clicks and power management.
++
++if INPUT_TPS43
++
++config INPUT_TPS43_INIT_PRIORITY
++    int "Init priority"
++    default 90
++    help
++      Device driver initialization priority.
++
++endif # ZMK_SENSOR_TPS43
+diff --git a/modules/zmk-driver-azoteq-tps43/LICENSE b/modules/zmk-driver-azoteq-tps43/LICENSE
+new file mode 100644
+index 0000000..5d66278
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2025 Mariano Uvalle
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/modules/zmk-driver-azoteq-tps43/README.md b/modules/zmk-driver-azoteq-tps43/README.md
+new file mode 100644
+index 0000000..96d45d8
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/README.md
+@@ -0,0 +1,19 @@
++# Azoteq TPS43 driver (vendored)
++
++Vendored from [geeksville/zmk_driver_azoteq](https://github.com/geeksville/zmk_driver_azoteq)
++at commit `66d510249d139569a4060c35bd78c6a2159f83ed` (MIT, see `LICENSE`).
++It replaces the west project of the same driver; do not load both, because
++they define the same `azoteq,tps43` compatible and `CONFIG_INPUT_TPS43`.
++
++Layout changes only: sources moved to `src/`, built with `target_sources`
++from the repository root `CMakeLists.txt`, Kconfig loaded through the root
++`Kconfig`, and the devicetree bindings mirrored in
++`boards/shields/nickey44a/dts/bindings/input/` (an automatic DTS root).
++
++Behaviour change, `tps43_handle_swipe()` only: while three fingers are down,
++each sample reports only its dominant axis as
++`INPUT_BTN_WEST/EAST/NORTH/SOUTH`; an exact tie reports nothing. Upstream
++reports every non-zero axis, so a slightly diagonal swipe produced horizontal
++and vertical events together. One-finger hardware swipes are unchanged.
++Directions are in controller coordinates (after `switch-xy`/`invert-x`); the
++listener transform affects only relative events, not these key codes.
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.c b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+new file mode 100644
+index 0000000..ae3fac5
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+@@ -0,0 +1,1537 @@
++#include <stdint.h>
++#define DT_DRV_COMPAT azoteq_tps43
++
++#include <zephyr/device.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/drivers/i2c.h>
++#include <zephyr/drivers/gpio.h>
++#include <zephyr/sys/byteorder.h>
++#include <zephyr/input/input.h>
++#include <zephyr/dt-bindings/input/input-event-codes.h>
++#include <zephyr/logging/log.h>
++#include <stdlib.h>
++#include <math.h>
++#include <errno.h>
++
++#include "tps43.h"
++
++LOG_MODULE_REGISTER(tps43, CONFIG_INPUT_LOG_LEVEL);
++
++/**
++ * @brief Ends communication window with trackpad
++ *
++ * After each read of trackpad registers, it is necessary to end the communication window
++ * by writing the special address 0xEEEE, which causes a NACK from the device.
++ * This is a mandatory step according to the IQS5xx protocol.
++ *
++ * @param dev Pointer to trackpad device
++ */
++static void tps43_end_communication_window(const struct device *dev) {
++    const struct tps43_config *config = dev->config;
++    uint8_t end_buf[2];
++
++    sys_put_be16(TPS43_REG_END_COMM_WINDOW, end_buf);
++
++    int ret = i2c_write_dt(&config->i2c_bus, end_buf, sizeof(end_buf));
++    if (ret != 0 && ret != -EIO) {
++        LOG_INF("End communication window write returned: %d (NACK expected)", ret);
++    }
++}
++
++/**
++ * @brief Reads a sequence of trackpad registers
++ *
++ * Performs reading of multiple bytes from sequential trackpad registers,
++ * starting from the specified address. Used for reading related registers,
++ * such as gesture events (GESTURE_EVENTS_0 and GESTURE_EVENTS_1).
++ *
++ * @param dev Pointer to trackpad device
++ * @param reg Starting register address (16-bit)
++ * @param val Pointer to buffer for data
++ * @param len Number of bytes to read
++ * @return 0 on success, negative error code on failure
++ */
++static int read_sequence_registers(const struct device *dev, uint16_t reg, void *val, size_t len) {
++    const struct tps43_config *config = dev->config;
++    uint8_t addr_buf[2];
++    addr_buf[0] = (uint8_t)((reg >> 8) & 0xFF);
++    addr_buf[1] = (uint8_t)(reg & 0xFF);
++
++    return i2c_write_read_dt(&config->i2c_bus, addr_buf, 2, val, len);
++}
++
++/**
++ * @brief Reads a 16-bit trackpad register via I2C
++ *
++ * Performs reading of a 16-bit value from the specified trackpad register.
++ * Data is interpreted as big-endian (MSB first).
++ *
++ * @param dev Pointer to trackpad device
++ * @param reg Register address (16-bit)
++ * @param val Pointer to variable to store the read value
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_i2c_read_reg16(const struct device *dev, uint16_t reg, uint16_t *val)
++{
++    const struct tps43_config *config = dev->config;
++    uint8_t buf[2];
++    // forms 2-byte register address: (MSB, LSB)
++    // MSB: shift right by 8 bits (0x2F00 -> 0x2F)
++    // LSB: bitwise AND with mask - mask leaves only lower byte (0x2F00 -> 0x00)
++    uint8_t reg_buf[2] = {reg >> 8, reg & 0xFF};
++    int ret;
++
++    // writes register address (reg_buf) and reads 2 bytes of data (into buffer buf)
++    ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), buf, sizeof(buf));
++    if (ret < 0) {
++        LOG_ERR("Register 0x%04x read error: %d", reg, ret);
++        return ret;
++    }
++
++    // converts big-endian data (MSB first) back to 16-bit value
++    *val = (buf[0] << 8) | buf[1];
++    return 0;
++}
++
++/**
++ * @brief Writes a 16-bit value to trackpad register via I2C
++ *
++ * Performs writing of a 16-bit value to the specified trackpad register.
++ * Data is transmitted as big-endian (MSB first).
++ *
++ * @param dev Pointer to trackpad device
++ * @param reg Register address (16-bit)
++ * @param val Value to write (16-bit)
++ * @return 0 on success, negative error code on failure
++ */
++static __maybe_unused int tps43_i2c_write_reg16(const struct device *dev, uint16_t reg,
++                                                uint16_t val)
++{
++    const struct tps43_config *config = dev->config;
++    // forms 4-byte register address: (MSB, LSB, MSB_VALUE, LSB_VALUE)
++    uint8_t buf[4] = {reg >> 8, reg & 0xFF, val >> 8, val & 0xFF};
++    int ret;
++
++    ret = i2c_write_dt(&config->i2c_bus, buf, sizeof(buf));
++    if (ret < 0) {
++        LOG_ERR("Register 0x%04x write error: %d", reg, ret);
++        return ret;
++    }
++
++    return 0;
++}
++
++/**
++ * @brief Reads an 8-bit trackpad register via I2C
++ *
++ * Performs reading of an 8-bit value from the specified trackpad register.
++ * Used for reading most configuration and status registers.
++ *
++ * @param dev Pointer to trackpad device
++ * @param reg Register address (16-bit)
++ * @param val Pointer to variable to store the read value
++ * @param with_err Flag to log error or expected behavior
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_i2c_read_reg8_w_err(const struct device *dev, uint16_t reg, uint8_t *val, bool with_err)
++{
++    const struct tps43_config *config = dev->config;
++    // forms 2-byte register address: (MSB, LSB)
++    uint8_t reg_buf[2] = {reg >> 8, reg & 0xFF};
++    int ret;
++
++    ret = i2c_write_read_dt(&config->i2c_bus, reg_buf, sizeof(reg_buf), val, 1);
++    if (ret != 0) {
++        if (!with_err) {
++            LOG_INF("Expected completion of register 0x%04x read: %d", reg, ret);
++        } else {
++            LOG_ERR("Register 0x%04x read error: %d", reg, ret);
++        }
++        return ret;
++    }
++    return ret;
++}
++
++static inline int tps43_i2c_read_reg8(const struct device *dev, uint16_t reg, uint8_t *val)
++{
++    return tps43_i2c_read_reg8_w_err(dev, reg, val, true);
++}
++
++/**
++ * @brief Writes an 8-bit value to trackpad register via I2C
++ *
++ * Performs writing of an 8-bit value to the specified trackpad register.
++ * Used for writing configuration and control registers.
++ *
++ * @param dev Pointer to trackpad device
++ * @param reg Register address (16-bit)
++ * @param val Value to write (8-bit)
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_i2c_write_reg8(const struct device *dev, uint16_t reg, uint8_t val)
++{
++    const struct tps43_config *config = dev->config;
++    uint8_t buf[3] = {reg >> 8, reg & 0xFF, val};
++    int ret;
++
++    ret = i2c_write_dt(&config->i2c_bus, buf, sizeof(buf));
++    if (ret < 0) {
++        LOG_ERR("Register 0x%04x write error: %d", reg, ret);
++        return ret;
++    }
++
++    return 0;
++}
++
++/**
++ * @brief Callback handler for RDY pin interrupt from trackpad
++ *
++ * Called when the RDY (Ready) pin state of the trackpad changes,
++ * signaling that new data is available for reading.
++ * Schedules execution of work handler to read the data.
++ *
++ * @param dev Pointer to trackpad device
++ * @param cb Pointer to GPIO callback structure
++ * @param pins Mask of pins that triggered the interrupt
++ */
++ static void tps43_rdy_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
++     struct tps43_drv_data *drv_data = CONTAINER_OF(cb, struct tps43_drv_data, rdy_cb);
++
++     k_work_submit(&drv_data->work);
++ }
++
++
++/** Dump charging state */
++static void tps43_dump_status(const struct device *dev) {
++
++    uint8_t sys_info = 0;
++    tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_INFO_0, &sys_info);
++    LOG_INF("Charging state: 0x%02X", sys_info & TPS43_CHARGING_MODE_MASK); // for debugging charging mode
++}
++
++/** Force communication start with the trackpad.  See datasheet 8.8.2 */
++static void tps43_force_communication(const struct device *dev) {
++    // Do a bogus read where we don't care about a possible NACK
++    uint8_t control_reg = 0;
++    tps43_i2c_read_reg8_w_err(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg, false);
++}
++
++/**
++ * @brief Internal function to put trackpad into suspend/resume mode
++ *
++ * Controls the SYSTEM_CONTROL_1 register (0x0432), setting or clearing the SUSPEND bit.
++ * In suspend mode, the trackpad enters a low power consumption state and does not process
++ * touches until wake-up.
++ *
++ * @param dev Pointer to trackpad device
++ * @param suspend true - enter suspend, false - exit suspend
++ * @param lock_held true if semaphore is already held (for internal use)
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_set_suspend_internal(const struct device *dev, bool suspend, bool lock_held) {
++    struct tps43_drv_data *drv_data = dev->data;
++    const struct tps43_config *config = dev->config;
++    int ret = 0;
++
++    // If power management is disabled, or device is already in the desired state, do nothing
++    if (drv_data->suspended == suspend || !config->enable_power_management) {
++        return 0;
++    }
++
++    // Acquire semaphore if not already held
++    if (!lock_held) {
++        if (k_sem_take(&drv_data->lock, K_MSEC(100)) != 0) {
++            LOG_WRN("Failed to acquire semaphore for suspend/resume");
++            return -EBUSY;
++        }
++    }
++
++    // Disable RDY interrupts when entering suspend (before any I2C operations)
++    // This prevents race condition when RDY fires between suspend attempt and flag setting
++    if (suspend && config->rdy_gpio.port != NULL) {
++        ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio, GPIO_INT_DISABLE);
++        if (ret == 0) {
++            LOG_INF("RDY interrupts disabled before suspend");
++        }
++    }
++
++    uint8_t control_reg = 0;
++
++    // When exiting suspend, first transaction will return NACK (section 7.3.1)
++    if (drv_data->suspended && !suspend) {
++        tps43_force_communication(dev);
++        k_sleep(K_MSEC(1)); // need at least 200uS before 2nd read
++        LOG_INF("I2C Wake: device awakened from suspend");
++
++        // After wake-up, read register again
++        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
++
++    } else if (!drv_data->suspended) {
++        tps43_force_communication(dev);
++        tps43_dump_status(dev); // for debugging power management behavior
++
++        // Read current value
++        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &control_reg);
++    }
++
++    if (suspend) {
++        control_reg |= TPS43_SUSPEND;
++        LOG_INF("Entering suspend (low power consumption)");
++    } else {
++        control_reg &= ~TPS43_SUSPEND;
++        LOG_INF("Exiting suspend");
++    }
++
++    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, control_reg);
++    if (ret != 0) {
++        if (ret == -EIO && suspend) {
++            LOG_INF("Failed to write suspend, device already in suspend");
++            drv_data->suspended = true;
++            ret = 0;
++            goto done;
++        }
++        LOG_ERR("SYSTEM_CONTROL_1 write error: %d", ret);
++        goto done;
++    }
++
++    drv_data->suspended = suspend;
++
++done:
++    // Enable RDY interrupts after resume
++    if (!suspend && config->rdy_gpio.port != NULL) {
++        ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio, GPIO_INT_EDGE_TO_ACTIVE);
++        if (ret == 0) {
++            LOG_INF("RDY interrupts enabled");
++        }
++    }
++    tps43_end_communication_window(dev);
++    if (!lock_held) {
++        k_sem_give(&drv_data->lock);
++    }
++    return ret;
++}
++
++/** Common swipe handling for 1 and 3 finger variants */
++static void tps43_handle_swipe(const struct device *dev, uint8_t num_fingers, int16_t rel_x, int16_t rel_y) {
++    const struct tps43_config *config = dev->config;
++    struct tps43_drv_data *drv_data = dev->data;
++
++    bool enabled = false;
++
++    if (num_fingers == 3) {
++        if (config->swipes || config->three_finger_swipe) {
++            enabled = true;
++        }
++    }
++
++    if (num_fingers == 1) {
++        if (config->swipes) {
++            enabled = true;
++        }
++    }
++
++    if (!enabled) {
++        return;
++    }
++
++    // Three-finger swipe is derived from raw movement deltas on every report while
++    // 3 fingers are down, rather than a single hardware-gated gesture event like the
++    // 1-finger swipe. Throttle it so one continuous swipe motion doesn't fire repeatedly.
++    if (num_fingers == 3 && config->three_finger_swipe_throttle_ms > 0) {
++        int64_t now = k_uptime_get();
++        if ((now - drv_data->last_three_finger_swipe_ms) < config->three_finger_swipe_throttle_ms) {
++            return;
++        }
++        drv_data->last_three_finger_swipe_ms = now;
++    }
++
++    /*
++     * Nickey44A local change: a three-finger sample reports only its dominant
++     * axis, and an exact tie reports nothing. Upstream reports every non-zero
++     * axis, so a slightly diagonal swipe emits horizontal and vertical events
++     * together. One-finger hardware swipes keep the upstream behaviour.
++     */
++    if (num_fingers == 3) {
++        int abs_x = abs(rel_x);
++        int abs_y = abs(rel_y);
++        if (abs_x > abs_y) {
++            rel_y = 0;
++        } else if (abs_y > abs_x) {
++            rel_x = 0;
++        } else {
++            return;
++        }
++    }
++
++    if (rel_x < 0) {
++        LOG_INF("%d-finger swipe left - INPUT_BTN_WEST", num_fingers);
++        input_report_key(dev, INPUT_BTN_WEST, 1, true, K_FOREVER);
++        input_report_key(dev, INPUT_BTN_WEST, 0, true, K_FOREVER);
++    }
++    if (rel_x > 0) {
++        LOG_INF("%d-finger swipe right - INPUT_BTN_EAST", num_fingers);
++        input_report_key(dev, INPUT_BTN_EAST, 1, true, K_FOREVER);
++        input_report_key(dev, INPUT_BTN_EAST, 0, true, K_FOREVER);
++    }
++    if (rel_y < 0) {
++        LOG_INF("%d-finger swipe up - INPUT_BTN_NORTH", num_fingers);
++        input_report_key(dev, INPUT_BTN_NORTH, 1, true, K_FOREVER);
++        input_report_key(dev, INPUT_BTN_NORTH, 0, true, K_FOREVER);
++    }
++    if (rel_y > 0) {
++        LOG_INF("%d-finger swipe down - INPUT_BTN_SOUTH", num_fingers);
++        input_report_key(dev, INPUT_BTN_SOUTH, 1, true, K_FOREVER);
++        input_report_key(dev, INPUT_BTN_SOUTH, 0, true, K_FOREVER);
++    }
++}
++
++/**
++ * @brief Main work handler for processing trackpad events
++ *
++ * Executed when receiving an interrupt from the trackpad (RDY pin).
++ * Reads and processes gesture events, cursor movement and scrolling,
++ * converting them into input events for the ZMK system.
++ * Also manages trackpad wake-up from suspend mode when activity is detected.
++ *
++ * Protected by semaphore to prevent interruption by other I2C operations,
++ * which ensures smooth cursor movement without interruptions.
++ *
++ * @param work Pointer to work structure
++ */
++static void tps43_work_handler(struct k_work *work) {
++    struct tps43_drv_data *drv_data = CONTAINER_OF(work, struct tps43_drv_data, work);
++    const struct device *dev = drv_data->dev;
++    const struct tps43_config *config = dev->config;
++    bool is_scroll_active = false;
++    bool is_zoom_active = false;
++    bool is_drag_active = drv_data->drag_active;
++    int ret;
++
++    // If device is in suspend, ignore interrupt (RDY should be disabled)
++    if (drv_data->suspended) {
++        LOG_WRN("RDY interrupt in suspend mode - ignoring");
++        return;
++    }
++
++    // Acquire semaphore to protect all I2C operations from interruption
++    // This prevents conflicts during simultaneous trackpad access
++    k_sem_take(&drv_data->lock, K_FOREVER);
++
++    /*
++     * Read the whole contiguous block from GESTURE_EVENTS_0 through REL_Y in a
++     * single I2C transaction instead of issuing several independent reads.
++     * This is much cheaper on the bus. Byte offsets into the buffer:
++     *   [0] GESTURE_EVENTS_0   (0x000D)
++     *   [1] GESTURE_EVENTS_1   (0x000E)
++     *   [2] SYSTEM_INFO_0      (0x000F)
++     *   [3] SYSTEM_INFO_1      (0x0010)
++     *   [4] NUM_FINGERS        (0x0011)
++     *   [5..6] REL_X           (0x0012, big-endian)
++     *   [7..8] REL_Y           (0x0014, big-endian)
++     */
++    uint8_t touch_data[(TPS43_REG_REL_Y + 2) - TPS43_REG_GESTURE_EVENTS_0];
++    ret = read_sequence_registers(dev, TPS43_REG_GESTURE_EVENTS_0, touch_data,
++                                  sizeof(touch_data));
++    if (ret < 0) {
++        LOG_ERR("Touch data read error: %d", ret);
++        goto done;
++    }
++
++    const uint8_t gestures_events[2] = {touch_data[0], touch_data[1]};
++    uint8_t num_fingers = touch_data[4];
++    int16_t rel_x = (int16_t)((touch_data[5] << 8) | touch_data[6]);
++    int16_t rel_y = (int16_t)((touch_data[7] << 8) | touch_data[8]);
++
++    bool is_touching = (num_fingers > 0);
++    if (is_touching != drv_data->touching) {
++        drv_data->touching = is_touching;
++        LOG_INF("Touch state changed: %s", is_touching ? "down" : "up");
++        input_report_key(dev, INPUT_BTN_TOUCH, is_touching ? 1 : 0, true, K_FOREVER);
++    }
++
++    if (gestures_events[0] != 0 || gestures_events[1] != 0) {
++
++        LOG_INF("Gestures: Single=0x%02X, Multi=0x%02X", gestures_events[0], gestures_events[1]);
++
++        if (gestures_events[0] & TPS43_SINGLE_TAP) {
++            LOG_INF("Single tap → LEFT BUTTON");
++            input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
++            input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
++        }
++        if (gestures_events[0] & (TPS43_SWIPE_UP | TPS43_SWIPE_DOWN | TPS43_SWIPE_LEFT | TPS43_SWIPE_RIGHT)) {
++            LOG_INF("Single finger swipe");
++            tps43_handle_swipe(dev, num_fingers, rel_x, rel_y);
++        }
++        if (gestures_events[1] & TPS43_TWO_FINGER_TAP) {
++            LOG_INF("Two finger tap → RIGHT BUTTON");
++            input_report_key(dev, INPUT_BTN_1, 1, true, K_FOREVER);
++            input_report_key(dev, INPUT_BTN_1, 0, true, K_FOREVER);
++        }
++        if ((gestures_events[0] & TPS43_PRESS_AND_HOLD) && (!(is_drag_active))) {
++            LOG_INF("Press and hold detected - DRAG (HOLD LEFT BUTTON)");
++            // set internal drag flag and press left mouse button
++            is_drag_active = true;
++            input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
++        }
++        if (gestures_events[1] & TPS43_SCROLL) {
++            // set scroll flag for processing in tp_movement block
++            is_scroll_active = true;
++        }
++        if (gestures_events[1] & TPS43_ZOOM) {
++            // set zoom flag for processing in tp_movement block
++            is_zoom_active = true;
++        }
++    }
++
++    // Detect release of a 'press and hold' left press
++    if ((!(gestures_events[0] & TPS43_PRESS_AND_HOLD)) && is_drag_active) {
++        LOG_INF("Press and hold end detected - RELEASE (RELEASE LEFT BUTTON)");
++        // release drag flag and release left mouse button
++        is_drag_active = false;
++        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);   // release + sync
++    }
++
++    if (rel_x != 0 || rel_y != 0) {
++        if (num_fingers == 3) {
++            LOG_INF("Three-finger movement - checking for swipe");
++            tps43_handle_swipe(dev, num_fingers, rel_x, rel_y);
++        } else if (is_scroll_active) {
++            // Scroll processing: keep only dominant axis
++            if (abs(rel_x) > abs(rel_y)) {
++                // Horizontal scroll
++                if (config->invert_scroll_x) {
++                    rel_x = -rel_x;
++                }
++                int16_t wheel = (rel_x * config->scroll_sensitivity) / 100;
++                LOG_INF("Scrolling %d horizontally", wheel);
++                input_report_rel(dev, INPUT_REL_HWHEEL, wheel, true, K_FOREVER);
++            } else {
++                // Vertical scroll
++                if (config->invert_scroll_y) {
++                    rel_y = -rel_y;
++                }
++                int16_t wheel = (rel_y * config->scroll_sensitivity) / 100;
++                LOG_INF("Scrolling %d vertically", wheel);
++                input_report_rel(dev, INPUT_REL_WHEEL, wheel, true, K_FOREVER);
++            }
++            is_scroll_active = false;
++        } else if (is_zoom_active) {
++            // Zoom processing: the zoom amount comes in via rel_x
++            int16_t zoom_delta = (rel_x * config->zoom_sensitivity) / 100;
++            LOG_INF("Zooming %d, rel_x=%d", zoom_delta, rel_x);
++            input_report_rel(dev, INPUT_REL_MISC, zoom_delta, true, K_FOREVER);
++            is_zoom_active = false;
++        } else {
++            // Normal cursor movement
++            if (rel_x != 0 ) {
++                int32_t scaled_x = ((int32_t)rel_x * config->sensitivity) / 100;
++                rel_x = (int16_t)CLAMP(scaled_x, INT16_MIN, INT16_MAX);
++            }
++            if (rel_y != 0) {
++                int32_t scaled_y = ((int32_t)rel_y * config->sensitivity) / 100;
++                rel_y = (int16_t)CLAMP(scaled_y, INT16_MIN, INT16_MAX);
++            }
++            LOG_INF("Sending movement: dx=%d, dy=%d", rel_x, rel_y);
++
++            input_report_rel(dev, INPUT_REL_X, rel_x, false, K_FOREVER);
++            input_report_rel(dev, INPUT_REL_Y, rel_y, true, K_FOREVER);
++        }
++    }
++
++done:
++    // Save for next call
++    drv_data->drag_active = is_drag_active;
++    tps43_end_communication_window(dev);
++
++    // Release semaphore after completing all I2C operations
++    k_sem_give(&drv_data->lock);
++}
++
++/**
++ * @brief Resets driver internal state values
++ *
++ * Initializes all driver state flags to initial values.
++ * Used during initialization and device reset.
++ *
++ * @param dev Pointer to trackpad device
++ * @return 0 on success
++ */
++static int tps43_reset_values(const struct device *dev) {
++    struct tps43_drv_data *drv_data = dev->data;
++
++    drv_data->device_ready = false;
++    drv_data->initialized = false;
++    drv_data->drag_active = false;
++
++    LOG_INF("Values reset");
++    return 0;
++}
++
++/**
++ * @brief Configures trackpad system registers for operation
++ *
++ * Sets up trackpad registers to track touch events, gestures and movement.
++ * Enables necessary gestures (single tap, press and hold, scroll, two finger tap),
++ * configures axis inversion and sets setup complete flag.
++ *
++ * @param dev Pointer to trackpad device
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_configure_device(const struct device *dev) {
++
++    const struct tps43_config *config = dev->config;
++    int ret;
++
++    // write to TPS43_REG_SYSTEM_CONFIG_1 events to track
++    uint8_t events_to_track = TPS43_TP_EVENT | TPS43_EVENT_MODE;
++
++    // Gestures (single_tap, press_and_hold, scroll, two_finger_tap)
++    if (config->single_tap || config->press_and_hold ||
++        config->scroll || config->two_finger_tap) {
++        events_to_track |= TPS43_GESTURE_EVENT;
++    }
++
++    // Touch events for absolute coordinates
++    events_to_track |= TPS43_TOUCH_EVENT;
++
++    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONFIG_1, events_to_track);
++    if (ret != 0) {
++        LOG_WRN("Events to track write error: %d", ret);
++        return ret;
++    }
++    LOG_INF("Events configured: 0x%02X", events_to_track);
++
++    // axis configuration
++    uint8_t xy_config = 0;
++    xy_config |= config->invert_x ? TPS43_FLIP_X : 0;
++    xy_config |= config->invert_y ? TPS43_FLIP_Y : 0;
++    xy_config |= config->switch_xy ? TPS43_SWITCH_XY_AXIS : 0;
++    ret = tps43_i2c_write_reg8(dev, TPS43_REG_XY_CONFIG_0, xy_config);
++    if (ret != 0) {
++        LOG_WRN("XY configuration write error: %d", ret);
++        return ret;
++    }
++
++    // enable single gestures at hardware level
++    if (config->single_tap || config->press_and_hold || config->swipes || config->three_finger_swipe) {
++        uint8_t single_gestures = 0;
++        single_gestures |= config->single_tap ? TPS43_SINGLE_TAP : 0;
++        single_gestures |= config->press_and_hold ? TPS43_PRESS_AND_HOLD : 0;
++        single_gestures |= config->swipes ? TPS43_SWIPE_UP : 0;
++        single_gestures |= config->swipes ? TPS43_SWIPE_DOWN : 0;
++        single_gestures |= config->swipes ? TPS43_SWIPE_LEFT : 0;
++        single_gestures |= config->swipes ? TPS43_SWIPE_RIGHT : 0;
++
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SINGLE_FINGER_GESTURES, single_gestures);
++        if (ret != 0) {
++            LOG_WRN("Single gestures configuration error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Single gestures enabled: 0x%02X", single_gestures);
++    }
++
++    // enable multi-gestures
++    if (config->two_finger_tap || config->scroll || config->zoom) {
++        uint8_t multi_gestures = 0;
++        multi_gestures |= config->two_finger_tap ? TPS43_TWO_FINGER_TAP : 0;
++        multi_gestures |= config->scroll ? TPS43_SCROLL : 0;
++        multi_gestures |= config->zoom ? TPS43_ZOOM : 0;
++
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_MULTI_FINGER_GESTURES, multi_gestures);
++        if (ret != 0) {
++            LOG_WRN("Multi-gesture configuration error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Multi-gestures enabled: 0x%02X", multi_gestures);
++    }
++
++    // filter configuration
++    ret = tps43_i2c_write_reg8(dev, TPS43_REG_FILTER_SETTINGS, config->filter_settings);
++    if (ret != 0) {
++        LOG_WRN("Filter settings write error: %d", ret);
++        return ret;
++    }
++    LOG_INF("Filter settings set: 0x%02X", config->filter_settings);
++
++    // dynamic filter configuration (only if set in DT)
++    if (config->filter_dynamic_bottom != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_XY_DYNAMIC_FILTER_BOTTOM,
++                                   (uint8_t)config->filter_dynamic_bottom);
++        if (ret != 0) {
++            LOG_WRN("Dynamic filter bottom write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Dynamic filter bottom set: 0x%02X", (uint8_t)config->filter_dynamic_bottom);
++    }
++
++    if (config->filter_dynamic_lower != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_XY_DYNAMIC_FILTER_LOWER,
++                                   (uint8_t)config->filter_dynamic_lower);
++        if (ret != 0) {
++            LOG_WRN("Dynamic filter lower write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Dynamic filter lower set: 0x%02X", (uint8_t)config->filter_dynamic_lower);
++    }
++
++    if (config->filter_dynamic_upper != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_XY_DYNAMIC_FILTER_UPPER,
++                                    (uint16_t)config->filter_dynamic_upper);
++        if (ret != 0) {
++            LOG_WRN("Dynamic filter upper write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Dynamic filter upper set: 0x%04X", (uint16_t)config->filter_dynamic_upper);
++    }
++
++    // resolution configuration (only if set in DT)
++    if (config->x_resolution != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_X_RESOLUTION,
++                                    (uint16_t)config->x_resolution);
++        if (ret != 0) {
++            LOG_WRN("X resolution write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("X resolution set: %d", (uint16_t)config->x_resolution);
++    }
++
++    if (config->y_resolution != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_Y_RESOLUTION,
++                                    (uint16_t)config->y_resolution);
++        if (ret != 0) {
++            LOG_WRN("Y resolution write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Y resolution set: %d", (uint16_t)config->y_resolution);
++    }
++
++    // swipe configuration (only if set in DT)
++    if (config->swipe_initial_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_SWIPE_INITIAL_DISTANCE,
++                                    (uint16_t)config->swipe_initial_distance);
++        if (ret != 0) {
++            LOG_WRN("Swipe distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Swipe initial distance set: %u px", (uint16_t)config->swipe_initial_distance);
++    }
++
++    if (config->swipe_initial_time != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_SWIPE_INITIAL_TIME,
++                                    (uint16_t)config->swipe_initial_time);
++        if (ret != 0) {
++            LOG_WRN("Swipe time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Swipe initial time set: %u ms", (uint16_t)config->swipe_initial_time);
++    }
++
++    if (config->swipe_angle != -1) {
++        double angle_rad = config->swipe_angle * 3.141592653589793 / 180.0;
++        uint8_t reg_val = (uint8_t)(64.0 * tan(angle_rad));
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SWIPE_ANGLE, reg_val);
++        if (ret != 0) {
++            LOG_WRN("Swipe angle write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Swipe angle set: %d deg (reg: 0x%02X)", config->swipe_angle, reg_val);
++    }
++
++    if (config->swipe_consecutive_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_SWIPE_CONSECUTIVE_DISTANCE,
++                                    (uint16_t)config->swipe_consecutive_distance);
++        if (ret != 0) {
++            LOG_WRN("Swipe consecutive distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Swipe consecutive distance set: %u px", (uint16_t)config->swipe_consecutive_distance);
++    }
++
++    if (config->swipe_consecutive_time != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_SWIPE_CONSECUTIVE_TIME,
++                                    (uint16_t)config->swipe_consecutive_time);
++        if (ret != 0) {
++            LOG_WRN("Swipe consecutive time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Swipe consecutive time set: %u ms", (uint16_t)config->swipe_consecutive_time);
++    }
++
++    // scroll configuration (only if set in DT)
++    if (config->scroll_initial_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_SCROLL_INITIAL_DISTANCE,
++                                    (uint16_t)config->scroll_initial_distance);
++        if (ret != 0) {
++            LOG_WRN("Scroll initial distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Scroll initial distance set: %u px", (uint16_t)config->scroll_initial_distance);
++    }
++
++    if (config->scroll_angle != -1) {
++        double angle_rad = config->scroll_angle * 3.141592653589793 / 180.0;
++        uint8_t reg_val = (uint8_t)(64.0 * tan(angle_rad));
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SCROLL_ANGLE, reg_val);
++        if (ret != 0) {
++            LOG_WRN("Scroll angle write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Scroll angle set: %d deg (reg: 0x%02X)", config->scroll_angle, reg_val);
++    }
++
++    // zoom configuration (only if set in DT)
++    if (config->zoom_initial_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_ZOOM_INITIAL_DISTANCE,
++                                    (uint16_t)config->zoom_initial_distance);
++        if (ret != 0) {
++            LOG_WRN("Zoom initial distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Zoom initial distance set: %u px", (uint16_t)config->zoom_initial_distance);
++    }
++
++    if (config->zoom_consecutive_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_ZOOM_CONSECUTIVE_DISTANCE,
++                                    (uint16_t)config->zoom_consecutive_distance);
++        if (ret != 0) {
++            LOG_WRN("Zoom consecutive distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Zoom consecutive distance set: %u px", (uint16_t)config->zoom_consecutive_distance);
++    }
++
++    // tap/hold configuration (only if set in DT)
++    if (config->tap_time != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_TAP_TIME,
++                                    (uint16_t)config->tap_time);
++        if (ret != 0) {
++            LOG_WRN("Tap time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Tap time set: %u ms", (uint16_t)config->tap_time);
++    }
++
++    if (config->tap_distance != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_TAP_DISTANCE,
++                                    (uint16_t)config->tap_distance);
++        if (ret != 0) {
++            LOG_WRN("Tap distance write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Tap distance set: %u px", (uint16_t)config->tap_distance);
++    }
++
++    if (config->hold_time != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_HOLD_TIME,
++                                    (uint16_t)config->hold_time);
++        if (ret != 0) {
++            LOG_WRN("Hold time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Hold time set: %u ms", (uint16_t)config->hold_time);
++    }
++
++    // ATI configuration (only if set in DT)
++    if (config->ati_target != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_ATI_TARGET,
++                                    (uint16_t)config->ati_target);
++        if (ret != 0) {
++            LOG_WRN("ATI target write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("ATI target set: %u", (uint16_t)config->ati_target);
++    }
++
++    if (config->ref_drift_limit != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_REF_DRIFT_LIMIT,
++                                   (uint8_t)config->ref_drift_limit);
++        if (ret != 0) {
++            LOG_WRN("Ref drift limit write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Ref drift limit set: %u", (uint8_t)config->ref_drift_limit);
++    }
++
++    if (config->reati_lower_limit != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_REATI_LOWER_LIMIT,
++                                   (uint8_t)config->reati_lower_limit);
++        if (ret != 0) {
++            LOG_WRN("REATI lower limit write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("REATI lower limit set: %u", (uint8_t)config->reati_lower_limit);
++    }
++
++    if (config->reati_upper_limit != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_REATI_UPPER_LIMIT,
++                                   (uint8_t)config->reati_upper_limit);
++        if (ret != 0) {
++            LOG_WRN("REATI upper limit write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("REATI upper limit set: %u", (uint8_t)config->reati_upper_limit);
++    }
++
++    if (config->max_count_limit != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_MAX_COUNT_LIMIT,
++                                    (uint16_t)config->max_count_limit);
++        if (ret != 0) {
++            LOG_WRN("Max count limit write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Max count limit set: %u", (uint16_t)config->max_count_limit);
++    }
++
++    if (config->ati_retry_time != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_ATI_RETRY_TIME,
++                                   (uint8_t)config->ati_retry_time);
++        if (ret != 0) {
++            LOG_WRN("ATI retry time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("ATI retry time set: %u s", (uint8_t)config->ati_retry_time);
++    }
++
++    // Report rate configuration (only if set in DT)
++    if (config->report_rate_active != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_REPORT_RATE_ACTIVE,
++                                    (uint16_t)config->report_rate_active);
++        if (ret != 0) {
++            LOG_WRN("Report rate active write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Report rate active set: %u ms", (uint16_t)config->report_rate_active);
++    }
++
++    if (config->report_rate_idle_touch != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_REPORT_RATE_IDLE_TOUCH,
++                                    (uint16_t)config->report_rate_idle_touch);
++        if (ret != 0) {
++            LOG_WRN("Report rate idle touch write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Report rate idle touch set: %u ms", (uint16_t)config->report_rate_idle_touch);
++    }
++
++    if (config->report_rate_idle != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_REPORT_RATE_IDLE,
++                                    (uint16_t)config->report_rate_idle);
++        if (ret != 0) {
++            LOG_WRN("Report rate idle write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Report rate idle set: %u ms", (uint16_t)config->report_rate_idle);
++    }
++
++    if (config->report_rate_lp1 != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_REPORT_RATE_LP1,
++                                    (uint16_t)config->report_rate_lp1);
++        if (ret != 0) {
++            LOG_WRN("Report rate LP1 write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Report rate LP1 set: %u ms", (uint16_t)config->report_rate_lp1);
++    }
++
++    if (config->report_rate_lp2 != -1) {
++        ret = tps43_i2c_write_reg16(dev, TPS43_REG_REPORT_RATE_LP2,
++                                    (uint16_t)config->report_rate_lp2);
++        if (ret != 0) {
++            LOG_WRN("Report rate LP2 write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Report rate LP2 set: %u ms", (uint16_t)config->report_rate_lp2);
++    }
++
++    // Timeout configuration (only if set in DT)
++    if (config->timeout_active != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_TIMEOUT_ACTIVE,
++                                   (uint8_t)config->timeout_active);
++        if (ret != 0) {
++            LOG_WRN("Timeout active write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Timeout active set: %u s", (uint8_t)config->timeout_active);
++    }
++
++    if (config->timeout_idle_touch != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_TIMEOUT_IDLE_TOUCH,
++                                   (uint8_t)config->timeout_idle_touch);
++        if (ret != 0) {
++            LOG_WRN("Timeout idle touch write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Timeout idle touch set: %u s", (uint8_t)config->timeout_idle_touch);
++    }
++
++    if (config->timeout_idle != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_TIMEOUT_IDLE,
++                                   (uint8_t)config->timeout_idle);
++        if (ret != 0) {
++            LOG_WRN("Timeout idle write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Timeout idle set: %u s", (uint8_t)config->timeout_idle);
++    }
++
++    if (config->timeout_lp1 != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_TIMEOUT_LP1,
++                                   (uint8_t)config->timeout_lp1);
++        if (ret != 0) {
++            LOG_WRN("Timeout LP1 write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Timeout LP1 set: %u s", (uint8_t)config->timeout_lp1);
++    }
++
++    if (config->ref_update_time != -1) {
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_REF_UPDATE_TIME,
++                                   (uint8_t)config->ref_update_time);
++        if (ret != 0) {
++            LOG_WRN("Ref update time write error: %d", ret);
++            return ret;
++        }
++        LOG_INF("Ref update time set: %u s", (uint8_t)config->ref_update_time);
++    }
++
++    // set configuration complete flag
++    ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONFIG_0, TPS43_SETUP_COMPLETE | TPS43_WDT_ENABLE | TPS43_REATI);
++    if (ret != 0) {
++        LOG_WRN("Setup complete flag write error: %d", ret);
++        return ret;
++    }
++
++    return 0;
++}
++
++/**
++ * @brief Checks device reset state and performs reconfiguration
++ *
++ * Waits for device readiness after reset, checks SHOW_RESET flag
++ * and sends reset acknowledgment (ACK_RESET) when necessary.
++ * Then performs full device configuration.
++ *
++ * @param dev Pointer to trackpad device
++ * @return 0 on success, negative error code on failure
++ */
++static int check_reset_and_reconfigure(const struct device *dev) {
++    struct tps43_drv_data *drv_data = dev->data;
++    int ret;
++    uint8_t sys_info = 0;
++    uint8_t wait_count = 0;
++    const uint8_t max_wait_count = 50;
++
++    // Wait for device readiness (the first few reads may fail until device is up)
++    do {
++        ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_INFO_0, &sys_info);
++        if (ret < 0) {
++            k_sleep(K_MSEC(100));
++            wait_count++;
++            if (wait_count >= max_wait_count) {
++                LOG_ERR("Device not responding after %d ms", wait_count * 100);
++                return -ETIMEDOUT;
++            }
++        }
++    } while (ret < 0);
++
++    LOG_INF("Device ready after %d ms", wait_count * 100);
++
++    // after reset, set flag to acknowledge that reset was performed
++    if (sys_info & TPS43_SHOW_RESET) {
++        LOG_INF("SHOW_RESET detected, sending ACK_RESET and enable ATI");
++        ret = tps43_i2c_write_reg8(dev, TPS43_REG_SYSTEM_CONTROL_0, TPS43_ACK_RESET | TPS43_AUTO_ATI);
++        if (ret != 0) {
++            LOG_ERR("ACK_RESET send error: %d", ret);
++            return ret;
++        }
++        k_sleep(K_MSEC(10));
++    }
++
++    ret = tps43_configure_device(dev);
++    if (ret != 0) {
++        LOG_ERR("Device configuration error: %d", ret);
++        return ret;
++    }
++
++    drv_data->device_ready = true;
++
++    return 0;
++}
++
++/**
++ * @brief Public function to put trackpad into suspend/resume
++ *
++ * @param dev Pointer to trackpad device
++ * @param suspend true - enter suspend, false - exit suspend
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_set_suspend(const struct device *dev, bool suspend) {
++    return tps43_set_suspend_internal(dev, suspend, false);
++}
++
++static void tps43_dump_registers(const struct device *dev) {
++    uint8_t reg8;
++    uint16_t reg16;
++    int ret = 0;
++    int read_ret;
++
++    LOG_INF("Dumping TPS43 registers");
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_INFO_0, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_INFO_0 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_INFO_0, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_INFO_1, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_INFO_1 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_INFO_1, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_0, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_CONTROL_0 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_CONTROL_0, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONTROL_1, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_CONTROL_1 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_CONTROL_1, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONFIG_0, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_CONFIG_0 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_CONFIG_0, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SYSTEM_CONFIG_1, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SYSTEM_CONFIG_1 (0x%04X): 0x%02X", TPS43_REG_SYSTEM_CONFIG_1, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_GLOBAL_ATI_C, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("GLOBAL_ATI_C (0x%04X): 0x%02X", TPS43_REG_GLOBAL_ATI_C, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_ATI_TARGET, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ATI_TARGET (0x%04X): 0x%04X", TPS43_REG_ATI_TARGET, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_REF_DRIFT_LIMIT, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REF_DRIFT_LIMIT (0x%04X): 0x%02X", TPS43_REG_REF_DRIFT_LIMIT, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_REATI_LOWER_LIMIT, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REATI_LOWER_LIMIT (0x%04X): 0x%02X", TPS43_REG_REATI_LOWER_LIMIT, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_REATI_UPPER_LIMIT, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REATI_UPPER_LIMIT (0x%04X): 0x%02X", TPS43_REG_REATI_UPPER_LIMIT, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_MAX_COUNT_LIMIT, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("MAX_COUNT_LIMIT (0x%04X): 0x%04X", TPS43_REG_MAX_COUNT_LIMIT, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_ATI_RETRY_TIME, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ATI_RETRY_TIME (0x%04X): 0x%02X", TPS43_REG_ATI_RETRY_TIME, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_REPORT_RATE_ACTIVE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REPORT_RATE_ACTIVE (0x%04X): 0x%04X", TPS43_REG_REPORT_RATE_ACTIVE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_REPORT_RATE_IDLE_TOUCH, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REPORT_RATE_IDLE_TOUCH (0x%04X): 0x%04X", TPS43_REG_REPORT_RATE_IDLE_TOUCH, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_REPORT_RATE_IDLE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REPORT_RATE_IDLE (0x%04X): 0x%04X", TPS43_REG_REPORT_RATE_IDLE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_REPORT_RATE_LP1, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REPORT_RATE_LP1 (0x%04X): 0x%04X", TPS43_REG_REPORT_RATE_LP1, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_REPORT_RATE_LP2, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REPORT_RATE_LP2 (0x%04X): 0x%04X", TPS43_REG_REPORT_RATE_LP2, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_TIMEOUT_ACTIVE, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TIMEOUT_ACTIVE (0x%04X): 0x%02X", TPS43_REG_TIMEOUT_ACTIVE, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_TIMEOUT_IDLE_TOUCH, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TIMEOUT_IDLE_TOUCH (0x%04X): 0x%02X", TPS43_REG_TIMEOUT_IDLE_TOUCH, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_TIMEOUT_IDLE, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TIMEOUT_IDLE (0x%04X): 0x%02X", TPS43_REG_TIMEOUT_IDLE, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_TIMEOUT_LP1, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TIMEOUT_LP1 (0x%04X): 0x%02X", TPS43_REG_TIMEOUT_LP1, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_REF_UPDATE_TIME, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("REF_UPDATE_TIME (0x%04X): 0x%02X", TPS43_REG_REF_UPDATE_TIME, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_XY_STATIC_BETA, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("XY_STATIC_BETA (0x%04X): 0x%02X", TPS43_REG_XY_STATIC_BETA, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_ALP_COUNT_BETA, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ALP_COUNT_BETA (0x%04X): 0x%02X", TPS43_REG_ALP_COUNT_BETA, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_ALP1_LTA_BETA, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ALP1_LTA_BETA (0x%04X): 0x%02X", TPS43_REG_ALP1_LTA_BETA, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_ALP2_LTA_BETA, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ALP2_LTA_BETA (0x%04X): 0x%02X", TPS43_REG_ALP2_LTA_BETA, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_XY_DYNAMIC_FILTER_BOTTOM, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("XY_DYNAMIC_FILTER_BOTTOM (0x%04X): 0x%02X", TPS43_REG_XY_DYNAMIC_FILTER_BOTTOM, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_XY_DYNAMIC_FILTER_LOWER, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("XY_DYNAMIC_FILTER_LOWER (0x%04X): 0x%02X", TPS43_REG_XY_DYNAMIC_FILTER_LOWER, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_XY_DYNAMIC_FILTER_UPPER, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("XY_DYNAMIC_FILTER_UPPER (0x%04X): 0x%04X", TPS43_REG_XY_DYNAMIC_FILTER_UPPER, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_X_RESOLUTION, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("X_RESOLUTION (0x%04X): 0x%04X", TPS43_REG_X_RESOLUTION, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_Y_RESOLUTION, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("Y_RESOLUTION (0x%04X): 0x%04X", TPS43_REG_Y_RESOLUTION, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_TAP_TIME, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TAP_TIME (0x%04X): %u ms", TPS43_REG_TAP_TIME, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_TAP_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("TAP_DISTANCE (0x%04X): %u px", TPS43_REG_TAP_DISTANCE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_HOLD_TIME, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("HOLD_TIME (0x%04X): %u ms", TPS43_REG_HOLD_TIME, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_SWIPE_INITIAL_TIME, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SWIPE_INITIAL_TIME (0x%04X): %u ms", TPS43_REG_SWIPE_INITIAL_TIME, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_SWIPE_INITIAL_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SWIPE_INITIAL_DISTANCE (0x%04X): %u px", TPS43_REG_SWIPE_INITIAL_DISTANCE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_SWIPE_CONSECUTIVE_TIME, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SWIPE_CONSECUTIVE_TIME (0x%04X): %u ms", TPS43_REG_SWIPE_CONSECUTIVE_TIME, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_SWIPE_CONSECUTIVE_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SWIPE_CONSECUTIVE_DISTANCE (0x%04X): %u px", TPS43_REG_SWIPE_CONSECUTIVE_DISTANCE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SWIPE_ANGLE, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SWIPE_ANGLE (0x%04X): 0x%02X", TPS43_REG_SWIPE_ANGLE, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_SCROLL_INITIAL_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SCROLL_INITIAL_DISTANCE (0x%04X): %u px", TPS43_REG_SCROLL_INITIAL_DISTANCE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg8(dev, TPS43_REG_SCROLL_ANGLE, &reg8);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("SCROLL_ANGLE (0x%04X): 0x%02X", TPS43_REG_SCROLL_ANGLE, reg8);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_ZOOM_INITIAL_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ZOOM_INITIAL_DISTANCE (0x%04X): %u px", TPS43_REG_ZOOM_INITIAL_DISTANCE, reg16);
++    }
++
++    read_ret = tps43_i2c_read_reg16(dev, TPS43_REG_ZOOM_CONSECUTIVE_DISTANCE, &reg16);
++    ret |= read_ret;
++    if (read_ret == 0) {
++        LOG_INF("ZOOM_CONSECUTIVE_DISTANCE (0x%04X): %u px", TPS43_REG_ZOOM_CONSECUTIVE_DISTANCE, reg16);
++    }
++
++    if (ret != 0) {
++        LOG_WRN("error: some reads failed...");
++    }
++
++    tps43_end_communication_window(dev);
++}
++
++/**
++ * @brief Initializes TPS43 trackpad driver
++ *
++ * Performs full driver initialization: checks I2C bus availability,
++ * performs hardware reset via GPIO RST (if connected), waits for device
++ * readiness, configures trackpad registers and sets up GPIO RDY interrupts.
++ * Also initializes power management system when necessary.
++ *
++ * @param dev Pointer to trackpad device
++ * @return 0 on success, negative error code on failure
++ */
++static int tps43_init(const struct device *dev) {
++
++    struct tps43_drv_data *drv_data = dev->data;
++    const struct tps43_config *config = dev->config;
++    int ret;
++
++    drv_data->dev = dev;
++
++    LOG_INF("=== Azoteq tps43 driver for device %s ===", dev->name);
++
++    // Check I2C bus
++    if (!device_is_ready(config->i2c_bus.bus)) {
++        LOG_ERR("I2C bus not available");
++        return -ENODEV;
++    }
++
++    LOG_INF("I2C bus: %s", config->i2c_bus.bus->name);
++    LOG_INF("I2C address: 0x%02x", config->i2c_bus.addr);
++
++    ret = tps43_reset_values(dev);
++    if (ret != 0) {
++        LOG_ERR("Values reset error: %d", ret);
++        return ret;
++    }
++
++    // GPIO reset via hardware RST
++    if (config->rst_gpio.port) {
++        ret = gpio_pin_configure_dt(&config->rst_gpio, GPIO_OUTPUT_INACTIVE);
++        if (ret != 0) {
++            LOG_ERR("RST GPIO configuration error: %d", ret);
++            return ret;
++        }
++
++        gpio_pin_set_dt(&config->rst_gpio, 0);
++        k_sleep(K_MSEC(10));
++        gpio_pin_set_dt(&config->rst_gpio, 1);
++        k_sleep(K_MSEC(610));
++
++        LOG_INF("Hardware reset completed");
++    }
++
++    // check SHOW_RESET and configure
++    ret = check_reset_and_reconfigure(dev);
++    if (ret != 0) {
++        LOG_ERR("Device configuration error: %d", ret);
++        return ret;
++    }
++
++    // configure RDY interrupts only AFTER device configuration!
++    if (config->rdy_gpio.port != NULL) {
++        ret = gpio_pin_configure_dt(&config->rdy_gpio, GPIO_INPUT);
++        if (ret != 0) {
++            LOG_WRN("RDY GPIO configuration error: %d", ret);
++        } else {
++            ret = gpio_pin_interrupt_configure_dt(&config->rdy_gpio,
++                                                    GPIO_INT_EDGE_TO_ACTIVE);
++            if (ret == 0) {
++                gpio_init_callback(&drv_data->rdy_cb, tps43_rdy_callback,
++                                    BIT(config->rdy_gpio.pin));
++                ret = gpio_add_callback(config->rdy_gpio.port, &drv_data->rdy_cb);
++                if (ret == 0) {
++                    LOG_INF("RDY interrupt configured");
++                } else {
++                    LOG_WRN("RDY callback add error: %d", ret);
++                }
++            }
++        }
++    }
++
++    drv_data->initialized = true;
++    drv_data->suspended = false;
++
++    // Initialize semaphore to protect I2C operations
++    // First parameter - initial count (1 = available)
++    // Second parameter - maximum count (1 = binary semaphore)
++    k_sem_init(&drv_data->lock, 1, 1);
++
++    k_work_init(&drv_data->work, tps43_work_handler);
++
++    tps43_dump_registers(dev);
++
++    LOG_INF("TPS43 driver successfully initialized");
++    return 0;
++}
++
++
++#define TPS43_INIT(inst)                                                                             \
++    static struct tps43_drv_data tps43_##inst##_drvdata = {                                          \
++        .device_ready = false,                                                                       \
++        .initialized = false,                                                                        \
++        .drag_active = false,                                                                        \
++        .suspended = false,                                                                          \
++    };                                                                                               \
++                                                                                                     \
++    static const struct tps43_config tps43_##inst##_config = {                                       \
++        .i2c_bus = I2C_DT_SPEC_INST_GET(inst),                                                       \
++        .rdy_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, rdy_gpios, {0}),                                  \
++        .rst_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, rst_gpios, {0}),                                  \
++        .single_tap = DT_INST_PROP(inst, single_tap),                                                \
++        .press_and_hold = DT_INST_PROP(inst, press_and_hold),                                        \
++        .two_finger_tap = DT_INST_PROP(inst, two_finger_tap),                                        \
++        .scroll = DT_INST_PROP(inst, scroll),                                                        \
++        .zoom = DT_INST_PROP(inst, zoom),                                                            \
++        .swipes = DT_INST_PROP(inst, swipes),                                                        \
++        .three_finger_swipe = DT_INST_PROP(inst, three_finger_swipe),                                \
++        .three_finger_swipe_throttle_ms = DT_INST_PROP_OR(inst, three_finger_swipe_throttle_ms, 300),\
++        .invert_x = DT_INST_PROP(inst, invert_x),                                                    \
++        .invert_y = DT_INST_PROP(inst, invert_y),                                                    \
++        .switch_xy = DT_INST_PROP(inst, switch_xy),                                                  \
++        .invert_scroll_x = DT_INST_PROP(inst, invert_scroll_x),                                      \
++        .invert_scroll_y = DT_INST_PROP(inst, invert_scroll_y),                                      \
++        .sensitivity = DT_INST_PROP_OR(inst, sensitivity, 100),                                      \
++        .scroll_sensitivity = DT_INST_PROP_OR(inst, scroll_sensitivity, 100),                        \
++        .zoom_sensitivity = DT_INST_PROP_OR(inst, zoom_sensitivity, 100),                            \
++        .enable_power_management = DT_INST_PROP_OR(inst, enable_power_management, true),             \
++        .idle_sleep = DT_INST_PROP_OR(inst, idle_sleep, false),                                      \
++        .filter_settings = DT_INST_PROP_OR(inst, filter_settings, 0x0F),                             \
++        .filter_dynamic_bottom = DT_INST_PROP_OR(inst, filter_dynamic_bottom, -1),                    \
++        .filter_dynamic_lower = DT_INST_PROP_OR(inst, filter_dynamic_lower, -1),                     \
++        .filter_dynamic_upper = DT_INST_PROP_OR(inst, filter_dynamic_upper, -1),                     \
++        .x_resolution = DT_INST_PROP_OR(inst, x_resolution, -1),                                     \
++        .y_resolution = DT_INST_PROP_OR(inst, y_resolution, -1),                                     \
++        .swipe_initial_distance = DT_INST_PROP_OR(inst, swipe_initial_distance, -1),                 \
++        .swipe_initial_time = DT_INST_PROP_OR(inst, swipe_initial_time, -1),                         \
++        .swipe_angle = DT_INST_PROP_OR(inst, swipe_angle, -1),                                       \
++        .swipe_consecutive_distance = DT_INST_PROP_OR(inst, swipe_consecutive_distance, -1),         \
++        .swipe_consecutive_time = DT_INST_PROP_OR(inst, swipe_consecutive_time, -1),                 \
++        .scroll_initial_distance = DT_INST_PROP_OR(inst, scroll_initial_distance, -1),               \
++        .scroll_angle = DT_INST_PROP_OR(inst, scroll_angle, -1),                                     \
++        .zoom_initial_distance = DT_INST_PROP_OR(inst, zoom_initial_distance, -1),                   \
++        .zoom_consecutive_distance = DT_INST_PROP_OR(inst, zoom_consecutive_distance, -1),           \
++        .ati_target = DT_INST_PROP_OR(inst, ati_target, -1),                                         \
++        .ref_drift_limit = DT_INST_PROP_OR(inst, ref_drift_limit, -1),                               \
++        .reati_lower_limit = DT_INST_PROP_OR(inst, reati_lower_limit, -1),                           \
++        .reati_upper_limit = DT_INST_PROP_OR(inst, reati_upper_limit, -1),                           \
++        .max_count_limit = DT_INST_PROP_OR(inst, max_count_limit, -1),                               \
++        .ati_retry_time = DT_INST_PROP_OR(inst, ati_retry_time, -1),                                 \
++        .report_rate_active = DT_INST_PROP_OR(inst, report_rate_active, -1),                         \
++        .report_rate_idle_touch = DT_INST_PROP_OR(inst, report_rate_idle_touch, -1),                 \
++        .report_rate_idle = DT_INST_PROP_OR(inst, report_rate_idle, -1),                             \
++        .report_rate_lp1 = DT_INST_PROP_OR(inst, report_rate_lp1, -1),                               \
++        .report_rate_lp2 = DT_INST_PROP_OR(inst, report_rate_lp2, -1),                               \
++        .timeout_active = DT_INST_PROP_OR(inst, timeout_active, -1),                                 \
++        .timeout_idle_touch = DT_INST_PROP_OR(inst, timeout_idle_touch, -1),                         \
++        .timeout_idle = DT_INST_PROP_OR(inst, timeout_idle, -1),                                     \
++        .timeout_lp1 = DT_INST_PROP_OR(inst, timeout_lp1, -1),                                       \
++        .ref_update_time = DT_INST_PROP_OR(inst, ref_update_time, -1),                               \
++        .tap_time = DT_INST_PROP_OR(inst, tap_time, -1),                                             \
++        .tap_distance = DT_INST_PROP_OR(inst, tap_distance, -1),                                     \
++        .hold_time = DT_INST_PROP_OR(inst, hold_time, -1),                                           \
++    };                                                                                               \
++                                                                                                     \
++    DEVICE_DT_INST_DEFINE(inst, tps43_init, NULL, &tps43_##inst##_drvdata, &tps43_##inst##_config,   \
++                        POST_KERNEL, CONFIG_INPUT_INIT_PRIORITY, NULL);                              \
++    BUILD_ASSERT(DT_INST_REG_ADDR(inst) == TPS43_I2C_ADDR, "I2C address mismatch");
++
++
++DT_INST_FOREACH_STATUS_OKAY(TPS43_INIT)
++
++/**
++ * @brief Public function to manage trackpad sleep mode
++ *
++ * This function is used by ZMK power management system (via tps43_idle_sleeper)
++ * to put trackpad into sleep mode when keyboard transitions to idle/sleep state.
++ *
++ * @param dev Pointer to trackpad device
++ * @param sleep true - enter sleep mode, false - wake up
++ * @return 0 on success, negative error code on failure
++ */
++int tps43_set_sleep(const struct device *dev, bool sleep) {
++    if (dev == NULL) {
++        return -EINVAL;
++    }
++    return tps43_set_suspend(dev, sleep);
++}
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.h b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+new file mode 100644
+index 0000000..4d66d50
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+@@ -0,0 +1,282 @@
++#pragma once
++
++#include <zephyr/device.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/drivers/gpio.h>
++#include <zephyr/drivers/i2c.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* TPS43 I2C address */
++#define TPS43_I2C_ADDR              0x74
++
++/* TPS43 controller register definitions with IQS572 - Based on IQS5xx-B000 datasheet */
++/* https://www.azoteq.com/images/stories/pdf/iqs5xx-b000_trackpad_datasheet.pdf */
++
++/* Gesture events */
++// Read-only
++#define TPS43_REG_GESTURE_EVENTS_0  0x000D  /* 1 byte */
++#define TPS43_REG_GESTURE_EVENTS_1  0x000E  /* 1 byte */
++
++/* System information */
++// Read-only
++#define TPS43_REG_SYSTEM_INFO_0     0x000F  /* 1 byte - Status flags */
++#define TPS43_REG_SYSTEM_INFO_1     0x0010  /* 1 byte - Status flags */
++
++/* Touch data - main coordinates */
++// Read-only
++#define TPS43_REG_NUM_FINGERS       0x0011  /* 1 byte */
++#define TPS43_REG_REL_X             0x0012  /* 2 bytes - relative X movement */
++#define TPS43_REG_REL_Y             0x0014  /* 2 bytes - relative Y movement */
++#define TPS43_REG_ABS_X             0x0016  /* 2 bytes - absolute X position */
++#define TPS43_REG_ABS_Y             0x0018  /* 2 bytes - absolute Y position */
++#define TPS43_REG_TOUCH_STRENGTH    0x001A  /* 2 bytes */
++#define TPS43_REG_TOUCH_AREA        0x001C  /* 1 byte */
++
++
++/* System control and configuration */
++// Read-write
++#define TPS43_REG_SYSTEM_CONTROL_0  0x0431  /* 1 byte - Main control (ACK_RESET, AUTO_ATI) */
++#define TPS43_REG_SYSTEM_CONTROL_1  0x0432  /* 1 byte - Event mode control */
++// Read-write
++#define TPS43_REG_SYSTEM_CONFIG_0   0x058E  /* 1 byte - System configuration */
++#define TPS43_REG_SYSTEM_CONFIG_1   0x058F  /* 1 byte - Additional configuration */
++
++#define TPS43_REG_GLOBAL_ATI_C      0x056B  /* 1 byte - Global ATI C value */
++#define TPS43_REG_ATI_TARGET        0x056D  /* 2 byte - ATI target value */
++#define TPS43_REG_REF_DRIFT_LIMIT   0x0571  /* 1 byte - ATI reference drift limit */
++#define TPS43_REG_REATI_LOWER_LIMIT 0x0573 /* 1 byte - ATI reattempt lower limit */
++#define TPS43_REG_REATI_UPPER_LIMIT 0x0574 /* 1 byte - ATI reattempt upper limit */
++#define TPS43_REG_MAX_COUNT_LIMIT   0x0575  /* 2 byte - ATI max count limit */
++#define TPS43_REG_ATI_RETRY_TIME    0x0577  /* 1 byte - ATI retry time [s] */
++#define TPS43_REG_REPORT_RATE_ACTIVE 0x057A /* 2 byte - Report rate active [ms]*/
++#define TPS43_REG_REPORT_RATE_IDLE_TOUCH 0x057C  /* 2 byte - Report rate idle touch [ms] */
++#define TPS43_REG_REPORT_RATE_IDLE  0x057E  /* 2 byte - Report rate idle [ms] */
++#define TPS43_REG_REPORT_RATE_LP1   0x0580  /* 2 byte - Report rate lp1 [ms] */
++#define TPS43_REG_REPORT_RATE_LP2   0x0582  /* 2 byte - Report rate lp2 [ms] */
++#define TPS43_REG_TIMEOUT_ACTIVE    0x0584  /* 1 byte - Timeout active [s] */
++#define TPS43_REG_TIMEOUT_IDLE_TOUCH      0x0585  /* 1 byte - Timeout idle touch [s] */
++#define TPS43_REG_TIMEOUT_IDLE      0x0586  /* 1 byte - Timeout idle [s] */
++#define TPS43_REG_TIMEOUT_LP1       0x0587  /* 1 byte - Timeout lp1 [s] */
++#define TPS43_REG_REF_UPDATE_TIME   0x0588  /* 1 byte - Reference update time [s] */
++
++// XY filtering settings
++#define TPS43_REG_XY_STATIC_BETA            0x0633  /* 1 byte - XY static beta (See 5.9.2.2) */
++#define TPS43_REG_ALP_COUNT_BETA            0x0634  /* 1 byte - ALP count beta (See 3.3.2) */
++#define TPS43_REG_ALP1_LTA_BETA             0x0635  /* 1 byte - ALP1 LTA beta (See 3.4.2) */
++#define TPS43_REG_ALP2_LTA_BETA             0x0636  /* 1 byte - ALP2 LTA beta */
++#define TPS43_REG_XY_DYNAMIC_FILTER_BOTTOM  0x0637  /* 1 byte - XY dynamic filter bottom beta (See 5.9.2.1) */
++#define TPS43_REG_XY_DYNAMIC_FILTER_LOWER   0x0638  /* 1 byte - XY dynamic filter lower speed */
++#define TPS43_REG_XY_DYNAMIC_FILTER_UPPER   0x0639  /* 2 bytes - XY dynamic filter upper speed */
++
++#define TPS43_REG_X_RESOLUTION              0x066E /* 2 bytes - X resolution */
++#define TPS43_REG_Y_RESOLUTION              0x0670 /* 2 bytes - Y resolution */
++
++#define TPS43_DEFAULT_READ_ADDRESS          0x0675 /* 2 bytes - default address used for reading if none is specified */
++/* XY configuration */
++// Read-write
++#define TPS43_REG_XY_CONFIG_0       0x0669  /* 1 byte */
++
++/* Gesture configuration */
++// Read-write // Low-level gesture configuration
++#define TPS43_REG_SINGLE_FINGER_GESTURES 0x06B7  /* 1 byte */
++#define TPS43_REG_MULTI_FINGER_GESTURES  0x06B8  /* 1 byte */
++#define TPS43_REG_TAP_TIME                   0x06B9  /* 2 bytes - Tap time [ms] */
++#define TPS43_REG_TAP_DISTANCE               0x06BB  /* 2 bytes - Tap distance [pixels] */
++#define TPS43_REG_HOLD_TIME                  0x06BD  /* 2 bytes - Hold time [ms] */
++#define TPS43_REG_SWIPE_INITIAL_TIME         0x06BF  /* 2 bytes - Swipe initial time [ms] */
++#define TPS43_REG_SWIPE_INITIAL_DISTANCE     0x06C1  /* 2 bytes - Swipe initial distance [pixels] */
++#define TPS43_REG_SWIPE_CONSECUTIVE_TIME     0x06C3  /* 2 bytes - Swipe consecutive time [ms] */
++#define TPS43_REG_SWIPE_CONSECUTIVE_DISTANCE 0x06C5  /* 2 bytes - Swipe consecutive distance [pixels] */
++#define TPS43_REG_SWIPE_ANGLE                0x06C7  /* 1 byte  - Swipe angle [64tan(deg)] */
++#define TPS43_REG_SCROLL_INITIAL_DISTANCE    0x06C8  /* 2 bytes - Scroll initial distance [pixels] */
++#define TPS43_REG_SCROLL_ANGLE               0x06CA  /* 1 byte  - Scroll angle [64tan(deg)] */
++#define TPS43_REG_ZOOM_INITIAL_DISTANCE      0x06CB  /* 2 bytes - Zoom initial distance [pixels] */
++#define TPS43_REG_ZOOM_CONSECUTIVE_DISTANCE  0x06CD  /* 2 bytes - Zoom consecutive distance [pixels] */
++
++/* Filter settings */
++// Read-write
++#define TPS43_REG_FILTER_SETTINGS   0x0632  /* 1 byte */
++
++
++/* ============================================================ */
++/* System information 0 (0x000F) - Status flags - 8 bits */
++/* ============================================================ */
++
++#define TPS43_SHOW_RESET            BIT(7)      /* Flag check on system reset */
++#define TPS43_CHARGING_MODE_MASK    0x07        /* Charging mode (bits 0-3) */
++
++/* ============================================================ */
++/* System information 1 (0x0010) - Status flags - 8 bits */
++/* ============================================================ */
++
++#define TPS43_SWITCH_STATE          BIT(5)      /* SW_IN pin state */
++#define TPS43_SNAP_TOGGLE           BIT(4)      /* Snap channel toggle */
++#define TPS43_RR_MISSED             BIT(3)      /* Report rate missed */
++#define TPS43_TOO_MANY_FINGERS      BIT(2)      /* Maximum touch points exceeded */
++#define TPS43_PALM_DETECT           BIT(1)      /* Palm detected */
++#define TPS43_TP_MOVEMENT           BIT(0)      /* Trackpad movement */
++
++
++/* ============================================================ */
++/* System control 0 (0x0431) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_ACK_RESET             BIT(7)      /* Reset acknowledgment */
++#define TPS43_AUTO_ATI              BIT(5)      /* Automatic ATI mode enable */
++
++/* ============================================================ */
++/* System control 1 (0x0432) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_RESET                 BIT(1)
++#define TPS43_SUSPEND               BIT(0)      /* Sleep mode */
++
++
++/* ============================================================ */
++/* System configuration 0 (0x058E) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_SETUP_COMPLETE        BIT(6)      /* Setup complete flag */
++#define TPS43_WDT_ENABLE            BIT(5)      /* Watchdog timer enable */
++#define TPS43_REATI                 BIT(2)      /* ALP auto reattempt */
++
++
++/* ============================================================ */
++/* System configuration 1 (0x058F) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_EVENT_MODE            BIT(0)
++#define TPS43_GESTURE_EVENT         BIT(1)
++#define TPS43_TP_EVENT              BIT(2)
++#define TPS43_REATI_EVENT           BIT(3)
++#define TPS43_TOUCH_EVENT           BIT(6)
++
++
++/* ============================================================ */
++/* XY configuration 0 (0x0669) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_FLIP_X                BIT(0)      /* Flip X axis */
++#define TPS43_FLIP_Y                BIT(1)      /* Flip Y axis */
++#define TPS43_SWITCH_XY_AXIS        BIT(2)      /* Swap X and Y axes */
++
++
++/* ============================================================ */
++/* Gesture events 0 (0x000D) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_SINGLE_TAP            BIT(0)      /* Single finger tap detected */
++#define TPS43_PRESS_AND_HOLD        BIT(1)      /* Press and hold detected */
++#define TPS43_SWIPE_UP              BIT(2)      /* Single finger swipe up */
++#define TPS43_SWIPE_DOWN            BIT(3)      /* Single finger swipe down */
++#define TPS43_SWIPE_LEFT            BIT(4)      /* Single finger swipe left */
++#define TPS43_SWIPE_RIGHT           BIT(5)      /* Single finger swipe right */
++
++/* ============================================================ */
++/* Gesture events 1 (0x000E) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_TWO_FINGER_TAP        BIT(0)      /* Two finger tap */
++#define TPS43_SCROLL                BIT(1)      /* Scroll up */
++#define TPS43_ZOOM                  BIT(2)      /* Zoom gesture */
++
++/* ============================================================ */
++/* Filter settings 0 (0x0632) - 8 bits */
++/* ============================================================ */
++
++#define TPS43_IIR_FILTER           BIT(0)      /* IIR filter */
++#define TPS43_MAV_FILTER           BIT(1)      /* MAV filter */
++#define TPS43_IIR_SELECT           BIT(2)      /* IIR select */
++#define TPS43_ALP_COUNT_FILTER     BIT(3)      /* ALP count filter */
++
++
++/* End communication window - MUST be called after each read (writing to invalid address 0xEEEE causes NACK) */
++#define TPS43_REG_END_COMM_WINDOW   0xEEEE
++
++struct tps43_config {
++    struct i2c_dt_spec i2c_bus;
++    struct gpio_dt_spec rdy_gpio;
++    struct gpio_dt_spec rst_gpio;
++
++    bool single_tap;
++    bool press_and_hold;
++    bool two_finger_tap;
++    bool scroll;
++    bool zoom;
++    bool swipes;
++    bool three_finger_swipe;
++    int16_t three_finger_swipe_throttle_ms;
++    bool invert_x;
++    bool invert_y;
++    bool switch_xy;
++    bool invert_scroll_x;
++    bool invert_scroll_y;
++
++    int16_t sensitivity;
++    int16_t scroll_sensitivity;
++    int16_t zoom_sensitivity;
++
++    bool enable_power_management;
++    bool idle_sleep;
++
++    uint8_t filter_settings;
++    int16_t filter_dynamic_bottom;
++    int16_t filter_dynamic_lower;
++    int16_t filter_dynamic_upper;
++    int16_t x_resolution;
++    int16_t y_resolution;
++    int16_t swipe_initial_distance;
++    int16_t swipe_initial_time;
++    int16_t swipe_angle;
++    int16_t swipe_consecutive_distance;
++    int16_t swipe_consecutive_time;
++    int16_t scroll_initial_distance;
++    int16_t scroll_angle;
++    int16_t zoom_initial_distance;
++    int16_t zoom_consecutive_distance;
++
++    int16_t ati_target;
++    int16_t ref_drift_limit;
++    int16_t reati_lower_limit;
++    int16_t reati_upper_limit;
++    int16_t max_count_limit;
++    int16_t ati_retry_time;
++    int16_t report_rate_active;
++    int16_t report_rate_idle_touch;
++    int16_t report_rate_idle;
++    int16_t report_rate_lp1;
++    int16_t report_rate_lp2;
++    int16_t timeout_active;
++    int16_t timeout_idle_touch;
++    int16_t timeout_idle;
++    int16_t timeout_lp1;
++    int16_t ref_update_time;
++    int16_t tap_time;
++    int16_t tap_distance;
++    int16_t hold_time;
++};
++
++struct tps43_drv_data {
++    const struct device *dev;
++    struct k_sem lock;
++    struct gpio_callback rdy_cb;
++    struct k_work work;
++
++    bool device_ready;
++    bool initialized;
++    bool drag_active;
++    bool suspended;
++    bool touching;
++    int64_t last_three_finger_swipe_ms;
++};
++
++int tps43_set_sleep(const struct device *dev, bool sleep);
++
++#ifdef __cplusplus
++}
++#endif
++
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43_idle_sleeper.c b/modules/zmk-driver-azoteq-tps43/src/tps43_idle_sleeper.c
+new file mode 100644
+index 0000000..8cbd0df
+--- /dev/null
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43_idle_sleeper.c
+@@ -0,0 +1,81 @@
++/**
++* @file tps43_idle_sleeper.c
++* @brief Integration of TPS43 trackpad power management with ZMK power management system
++* 
++* This module subscribes to ZMK activity state change events and automatically
++* puts the trackpad into sleep mode when the keyboard transitions to idle/sleep state,
++* which significantly reduces power consumption.
++* 
++* Works in conjunction with automatic power management in the main driver (tps43.c),
++* which monitors trackpad idle time.
++*/
++
++#include <zephyr/device.h>
++#include <zephyr/devicetree.h>
++#include <zmk/event_manager.h>
++#include <zmk/events/activity_state_changed.h>
++#include "tps43.h"
++
++#include <zephyr/logging/log.h>
++LOG_MODULE_REGISTER(tps43_sleeper, CONFIG_INPUT_LOG_LEVEL);
++
++/**
++* @brief Macro to get device pointer from devicetree
++*/
++#define GET_TPS43_DEV(node_id) DEVICE_DT_GET(node_id),
++
++/**
++* @brief Array of pointers to all TPS43 devices in the system
++* 
++* Automatically populated from devicetree for all devices with azoteq_tps43 compatibility
++*/
++static const struct device *tps43_devs[] = {DT_FOREACH_STATUS_OKAY(azoteq_tps43, GET_TPS43_DEV)};
++
++/**
++* @brief Handler for ZMK activity state change event
++* 
++* This function is called when the keyboard activity state changes:
++* - ZMK_ACTIVITY_ACTIVE - keyboard is active, trackpad should be awakened
++ * - ZMK_ACTIVITY_IDLE - keyboard is idle, trackpad is put to sleep only if
++ *   the device has the `idle-sleep` property set
++* - ZMK_ACTIVITY_SLEEP - keyboard is sleeping, trackpad is put to sleep
++* 
++* @param eh Pointer to activity state change event
++* @return 0 on successful handling
++*/
++static int on_activity_state(const zmk_event_t *eh) {
++    const struct zmk_activity_state_changed *state_ev = as_zmk_activity_state_changed(eh);
++    if (!state_ev) {
++        LOG_WRN("Event not found, ignoring");
++        return 0;
++    }
++
++    // Apply change to all TPS43 devices in the system
++    for (size_t i = 0; i < ARRAY_SIZE(tps43_devs); i++) {
++        const struct device *dev = tps43_devs[i];
++        const struct tps43_config *config = dev->config;
++
++        /*
++         * Sleep when fully sleeping. For the IDLE state, only sleep if the
++         * device opted in via the `idle-sleep` property; otherwise stay active.
++         * Wake up whenever the keyboard is ACTIVE.
++         */
++        bool should_sleep = (state_ev->state == ZMK_ACTIVITY_SLEEP) ||
++                            (state_ev->state == ZMK_ACTIVITY_IDLE && config->idle_sleep);
++
++        LOG_INF("ZMK activity state change: %d -> trackpad %zu %s",
++                state_ev->state, i, should_sleep ? "sleep" : "active");
++
++        int ret = tps43_set_sleep(dev, should_sleep);
++        if (ret != 0) {
++            LOG_WRN("Trackpad power management error %zu: %d", i, ret);
++        }
++    }
++
++    return 0;
++}
++
++// Register ZMK event listener
++ZMK_LISTENER(tps43_idle_sleeper, on_activity_state);
++// Subscribe to activity state change events
++ZMK_SUBSCRIPTION(tps43_idle_sleeper, zmk_activity_state_changed);
+\ No newline at end of file
+diff --git a/modules/zmk-input-processor-three-finger-swipe/CMakeLists.txt b/modules/zmk-input-processor-three-finger-swipe/CMakeLists.txt
+new file mode 100644
+index 0000000..79df91d
+--- /dev/null
++++ b/modules/zmk-input-processor-three-finger-swipe/CMakeLists.txt
+@@ -0,0 +1 @@
++target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/input_processor_three_finger_swipe.c)
+diff --git a/modules/zmk-input-processor-three-finger-swipe/README.md b/modules/zmk-input-processor-three-finger-swipe/README.md
+new file mode 100644
+index 0000000..fd14214
+--- /dev/null
++++ b/modules/zmk-input-processor-three-finger-swipe/README.md
+@@ -0,0 +1,26 @@
++# Three-finger swipe
++
++Local MIT-licensed processor for the right TPS43 listener, placed before
++touch-swipe. It consumes the driver's per-sample three-finger direction key
++events (`left-code`/`right-code`/`up-code`/`down-code`, mapped in the overlay
++from controller to physical directions) and taps one configured ZMK keycode
++per complete touch. The vendored driver reports only the dominant axis per
++sample and `three-finger-swipe-throttle-ms = <0>` gives one event per sample.
++
++TOUCH down resets on the idle-to-touch transition; TOUCH up resets fully.
++A horizontal fire needs abs(right - left) >= threshold and
++>= (up + down) * axis-ratio; vertical is symmetric. After firing nothing is
++counted until all fingers release. The four direction codes always return
++ZMK_INPUT_PROC_STOP; every other event passes unchanged.
++
++The binding is mirrored in the shield's dts/bindings directory (automatic DTS
++root); keep both YAML files in sync.
++
++## Tuning
++
++Nickey44A starts with threshold=3 samples and axis-ratio=2, with macOS
++Ctrl+Up for up and down (Mission Control toggle) and Ctrl+Right/Ctrl+Left for
++physical left/right swipes. If a direction is reversed on hardware, swap the
++corresponding `*-code` pair in nickey44a_r.overlay. Raise threshold for
++accidental fires, lower it for shorter swipes. The two-finger phase before the
++third finger lands can still scroll or trigger touch-swipe.
+diff --git a/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml b/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+new file mode 100644
+index 0000000..dcda963
+--- /dev/null
++++ b/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+@@ -0,0 +1,41 @@
++description: One four-way three-finger swipe per complete touch, with configurable ZMK keycodes
++compatible: "zmk,input-processor-three-finger-swipe"
++include: ip_zero_param.yaml
++properties:
++  touch-code:
++    type: int
++    required: true
++  left-code:
++    type: int
++    required: true
++    description: Input key code the driver reports for one physically leftward sample.
++  right-code:
++    type: int
++    required: true
++  up-code:
++    type: int
++    required: true
++  down-code:
++    type: int
++    required: true
++  threshold:
++    type: int
++    default: 3
++    description: Positive minimum net same-axis samples before firing.
++  axis-ratio:
++    type: int
++    default: 2
++    description: Positive ratio of net samples to the other axis's total samples.
++  left-keycode:
++    type: int
++    required: true
++    description: Encoded ZMK keycode tapped on a leftward swipe.
++  right-keycode:
++    type: int
++    required: true
++  up-keycode:
++    type: int
++    required: true
++  down-keycode:
++    type: int
++    required: true
+diff --git a/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c b/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
+new file mode 100644
+index 0000000..87b2e12
+--- /dev/null
++++ b/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
+@@ -0,0 +1,130 @@
++/* SPDX-License-Identifier: MIT */
++#define DT_DRV_COMPAT zmk_input_processor_three_finger_swipe
++#include <zephyr/device.h>
++#include <zephyr/kernel.h>
++
++#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
++#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
++#error "three-finger-swipe requires a central-side devicetree instance"
++#endif
++
++#include <drivers/input_processor.h>
++#include <zmk/events/keycode_state_changed.h>
++#include <zephyr/logging/log.h>
++LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
++
++enum tfs_dir { TFS_LEFT, TFS_RIGHT, TFS_UP, TFS_DOWN, TFS_DIRS };
++
++struct tfs_config {
++    uint16_t touch_code;
++    uint16_t codes[TFS_DIRS];
++    uint32_t keycodes[TFS_DIRS];
++    int32_t threshold;
++    int32_t axis_ratio;
++};
++
++struct tfs_data {
++    bool touching;
++    bool fired;
++    /* Sample counts; one count per driver report, saturated well below overflow. */
++    uint16_t count[TFS_DIRS];
++};
++
++static void reset(struct tfs_data *data) { *data = (struct tfs_data){0}; }
++
++static int find_dir(const struct tfs_config *cfg, uint16_t code) {
++    for (int i = 0; i < TFS_DIRS; i++) {
++        if (cfg->codes[i] == code) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++static void tap(uint32_t keycode) {
++    int64_t timestamp = k_uptime_get();
++    int press = raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
++    int release = raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
++    if (press < 0 || release < 0) {
++        LOG_WRN("three-finger swipe key output failed: %d/%d", press, release);
++    }
++}
++
++/* Returns the direction to fire on this axis, or -1. */
++static int axis_winner(const struct tfs_config *cfg, const struct tfs_data *data, int neg,
++                       int pos, int other_a, int other_b) {
++    int32_t net = (int32_t)data->count[pos] - (int32_t)data->count[neg];
++    int32_t magnitude = net < 0 ? -net : net;
++    int32_t other = (int32_t)data->count[other_a] + (int32_t)data->count[other_b];
++    if (magnitude >= cfg->threshold && magnitude >= other * cfg->axis_ratio) {
++        return net < 0 ? neg : pos;
++    }
++    return -1;
++}
++
++static int handle_event(const struct device *dev, struct input_event *event, uint32_t param1,
++                        uint32_t param2, struct zmk_input_processor_state *state) {
++    ARG_UNUSED(param1);
++    ARG_UNUSED(param2);
++    ARG_UNUSED(state);
++    struct tfs_data *data = dev->data;
++    const struct tfs_config *cfg = dev->config;
++
++    if (event->type != INPUT_EV_KEY) {
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    if (event->code == cfg->touch_code) {
++        if (!event->value) {
++            reset(data);
++        } else if (!data->touching) {
++            reset(data);
++            data->touching = true;
++        }
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++
++    int dir = find_dir(cfg, event->code);
++    if (dir < 0) {
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    /* Direction codes are always consumed; count presses only. */
++    if (!event->value || !data->touching || data->fired) {
++        return ZMK_INPUT_PROC_STOP;
++    }
++    if (data->count[dir] < UINT16_MAX / 4) {
++        data->count[dir]++;
++    }
++
++    int winner = axis_winner(cfg, data, TFS_LEFT, TFS_RIGHT, TFS_UP, TFS_DOWN);
++    if (winner < 0) {
++        winner = axis_winner(cfg, data, TFS_UP, TFS_DOWN, TFS_LEFT, TFS_RIGHT);
++    }
++    if (winner >= 0) {
++        /* Latch before output: one action per complete touch. */
++        data->fired = true;
++        LOG_DBG("three-finger swipe fired: %d", winner);
++        tap(cfg->keycodes[winner]);
++    }
++    return ZMK_INPUT_PROC_STOP;
++}
++
++static const struct zmk_input_processor_driver_api api = {.handle_event = handle_event};
++
++#define CREATE_INSTANCE(n)                                                                         \
++    BUILD_ASSERT(DT_INST_PROP(n, threshold) > 0, "threshold must be positive");                   \
++    BUILD_ASSERT(DT_INST_PROP(n, axis_ratio) > 0, "axis-ratio must be positive");                 \
++    static struct tfs_data data_##n;                                                               \
++    static const struct tfs_config config_##n = {                                                  \
++        .touch_code = DT_INST_PROP(n, touch_code),                                                 \
++        .codes = {DT_INST_PROP(n, left_code), DT_INST_PROP(n, right_code),                         \
++                  DT_INST_PROP(n, up_code), DT_INST_PROP(n, down_code)},                           \
++        .keycodes = {DT_INST_PROP(n, left_keycode), DT_INST_PROP(n, right_keycode),                \
++                     DT_INST_PROP(n, up_keycode), DT_INST_PROP(n, down_keycode)},                  \
++        .threshold = DT_INST_PROP(n, threshold),                                                   \
++        .axis_ratio = DT_INST_PROP(n, axis_ratio),                                                 \
++    };                                                                                             \
++    DEVICE_DT_INST_DEFINE(n, NULL, NULL, &data_##n, &config_##n, POST_KERNEL,                      \
++                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
++
++DT_INST_FOREACH_STATUS_OKAY(CREATE_INSTANCE)
++#endif
+diff --git a/zephyr/module.yml b/zephyr/module.yml
+index 413728a..61b2790 100644
+--- a/zephyr/module.yml
++++ b/zephyr/module.yml
+@@ -1,5 +1,6 @@
+ build:
+   cmake: .
++  kconfig: Kconfig
+   settings:
+     board_root: .
+     dts_root: modules/zmk-input-processor-touch-inertia
+-- 
+2.43.0
+
+
+From 2bed5d141d9c5bb308dbe9f9f5531090f8ecf003 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:15:59 +0900
+Subject: [PATCH 2/7] Add three-finger tap for Launchpad on right TPS43
+
+Driver reports three-finger contact; the processor taps LG(L) (keymap LAUNCH
+shortcut) for a short, still three-finger touch and drops accompanying clicks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ .../input-processor-three-finger-swipe.yaml   | 22 ++++++-
+ boards/shields/nickey44a/nickey44a_r.overlay  |  9 ++-
+ modules/zmk-driver-azoteq-tps43/README.md     |  4 ++
+ modules/zmk-driver-azoteq-tps43/src/tps43.c   |  7 +++
+ modules/zmk-driver-azoteq-tps43/src/tps43.h   |  9 +++
+ .../README.md                                 | 11 ++++
+ .../input-processor-three-finger-swipe.yaml   | 22 ++++++-
+ .../src/input_processor_three_finger_swipe.c  | 63 ++++++++++++++++++-
+ 8 files changed, 143 insertions(+), 4 deletions(-)
+
+diff --git a/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+index dcda963..a24ded8 100644
+--- a/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
++++ b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+@@ -1,4 +1,4 @@
+-description: One four-way three-finger swipe per complete touch, with configurable ZMK keycodes
++description: One four-way three-finger swipe or tap per complete touch, with configurable ZMK keycodes
+ compatible: "zmk,input-processor-three-finger-swipe"
+ include: ip_zero_param.yaml
+ properties:
+@@ -39,3 +39,23 @@ properties:
+   down-keycode:
+     type: int
+     required: true
++  three-finger-code:
++    type: int
++    required: true
++    description: Input key code the driver reports while exactly three fingers are down.
++  tap-keycode:
++    type: int
++    default: 0
++    description: Encoded ZMK keycode tapped on a three-finger tap; 0 disables taps.
++  tap-max-ms:
++    type: int
++    default: 300
++    description: Maximum touch duration, first contact to full release, for a tap.
++  tap-max-samples:
++    type: int
++    default: 2
++    description: Maximum three-finger direction samples allowed in a tap.
++  click-suppress-ms:
++    type: int
++    default: 150
++    description: After a three-finger touch, drop INPUT_BTN_0/1 events for this long.
+diff --git a/boards/shields/nickey44a/nickey44a_r.overlay b/boards/shields/nickey44a/nickey44a_r.overlay
+index f8bbb55..42b8845 100644
+--- a/boards/shields/nickey44a/nickey44a_r.overlay
++++ b/boards/shields/nickey44a/nickey44a_r.overlay
+@@ -71,7 +71,7 @@
+     };
+ 
+     /*
+-     * Three-finger swipes (macOS): up/down = Mission Control, left/right =
++     * Three-finger gestures (macOS): tap = Launchpad, up/down = Mission Control, left/right =
+      * adjacent Space, following the trackpad convention (fingers left -> the
+      * Space to the right). The driver reports controller coordinates; with
+      * the measured orientation above, controller SOUTH = physical left,
+@@ -91,6 +91,13 @@
+         right-keycode = <LC(LEFT)>;
+         up-keycode = <LC(UP)>;
+         down-keycode = <LC(UP)>;
++        /* Driver-local three-finger contact code (TPS43_BTN_THREE_FINGERS). */
++        three-finger-code = <0x14e>;
++        /* Three-finger tap = Launchpad; same shortcut as the keymap's LAUNCH macro. */
++        tap-keycode = <LG(L)>;
++        tap-max-ms = <300>;
++        tap-max-samples = <2>;
++        click-suppress-ms = <150>;
+     };
+ 
+     tps43_touch_inertia: tps43_touch_inertia {
+diff --git a/modules/zmk-driver-azoteq-tps43/README.md b/modules/zmk-driver-azoteq-tps43/README.md
+index 96d45d8..27fa57f 100644
+--- a/modules/zmk-driver-azoteq-tps43/README.md
++++ b/modules/zmk-driver-azoteq-tps43/README.md
+@@ -17,3 +17,7 @@ reports every non-zero axis, so a slightly diagonal swipe produced horizontal
+ and vertical events together. One-finger hardware swipes are unchanged.
+ Directions are in controller coordinates (after `switch-xy`/`invert-x`); the
+ listener transform affects only relative events, not these key codes.
++
++Second change: the work handler reports key code 0x14e
++(`TPS43_BTN_THREE_FINGERS`, Linux BTN_TOOL_TRIPLETAP) as 1 when exactly
++three fingers are down and 0 when that ends, for three-finger tap detection.
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.c b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+index ae3fac5..dbc018a 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.c
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+@@ -450,6 +450,13 @@ static void tps43_work_handler(struct k_work *work) {
+         input_report_key(dev, INPUT_BTN_TOUCH, is_touching ? 1 : 0, true, K_FOREVER);
+     }
+ 
++    /* Nickey44A local change: expose three-finger contact for tap detection. */
++    bool three_fingers = (num_fingers == 3);
++    if (three_fingers != drv_data->three_fingers) {
++        drv_data->three_fingers = three_fingers;
++        input_report_key(dev, TPS43_BTN_THREE_FINGERS, three_fingers ? 1 : 0, true, K_FOREVER);
++    }
++
+     if (gestures_events[0] != 0 || gestures_events[1] != 0) {
+ 
+         LOG_INF("Gestures: Single=0x%02X, Multi=0x%02X", gestures_events[0], gestures_events[1]);
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.h b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+index 4d66d50..31969b7 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.h
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+@@ -271,9 +271,18 @@ struct tps43_drv_data {
+     bool drag_active;
+     bool suspended;
+     bool touching;
++    /* Nickey44A: exactly three fingers currently reported. */
++    bool three_fingers;
+     int64_t last_three_finger_swipe_ms;
+ };
+ 
++/*
++ * Nickey44A local key code, reported 1 when exactly three fingers are down
++ * and 0 when that ends. Same value as Linux BTN_TOOL_TRIPLETAP, which the
++ * Zephyr 3.5 input-event-codes header does not define.
++ */
++#define TPS43_BTN_THREE_FINGERS 0x14e
++
+ int tps43_set_sleep(const struct device *dev, bool sleep);
+ 
+ #ifdef __cplusplus
+diff --git a/modules/zmk-input-processor-three-finger-swipe/README.md b/modules/zmk-input-processor-three-finger-swipe/README.md
+index fd14214..bcd4607 100644
+--- a/modules/zmk-input-processor-three-finger-swipe/README.md
++++ b/modules/zmk-input-processor-three-finger-swipe/README.md
+@@ -24,3 +24,14 @@ physical left/right swipes. If a direction is reversed on hardware, swap the
+ corresponding `*-code` pair in nickey44a_r.overlay. Raise threshold for
+ accidental fires, lower it for shorter swipes. The two-finger phase before the
+ third finger lands can still scroll or trigger touch-swipe.
++
++## Three-finger tap
++
++The vendored driver reports key code 0x14e (`TPS43_BTN_THREE_FINGERS`) as 1
++while exactly three fingers are down. At full release, a touch that reached
++three fingers, fired no swipe, lasted at most `tap-max-ms` and produced at
++most `tap-max-samples` direction samples taps `tap-keycode` (0 disables).
++INPUT_BTN_0/1 are dropped during such a touch and for `click-suppress-ms`
++after it, so hardware single/two-finger taps do not click alongside.
++Nickey44A uses LG(L), the shortcut of the keymap's LAUNCH macro; the macOS
++Launchpad shortcut must be assigned to Cmd+L for this to open Launchpad.
+diff --git a/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml b/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+index dcda963..a24ded8 100644
+--- a/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
++++ b/modules/zmk-input-processor-three-finger-swipe/dts/bindings/input/processor/input-processor-three-finger-swipe.yaml
+@@ -1,4 +1,4 @@
+-description: One four-way three-finger swipe per complete touch, with configurable ZMK keycodes
++description: One four-way three-finger swipe or tap per complete touch, with configurable ZMK keycodes
+ compatible: "zmk,input-processor-three-finger-swipe"
+ include: ip_zero_param.yaml
+ properties:
+@@ -39,3 +39,23 @@ properties:
+   down-keycode:
+     type: int
+     required: true
++  three-finger-code:
++    type: int
++    required: true
++    description: Input key code the driver reports while exactly three fingers are down.
++  tap-keycode:
++    type: int
++    default: 0
++    description: Encoded ZMK keycode tapped on a three-finger tap; 0 disables taps.
++  tap-max-ms:
++    type: int
++    default: 300
++    description: Maximum touch duration, first contact to full release, for a tap.
++  tap-max-samples:
++    type: int
++    default: 2
++    description: Maximum three-finger direction samples allowed in a tap.
++  click-suppress-ms:
++    type: int
++    default: 150
++    description: After a three-finger touch, drop INPUT_BTN_0/1 events for this long.
+diff --git a/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c b/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
+index 87b2e12..1dabd79 100644
+--- a/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
++++ b/modules/zmk-input-processor-three-finger-swipe/src/input_processor_three_finger_swipe.c
+@@ -8,6 +8,7 @@
+ #error "three-finger-swipe requires a central-side devicetree instance"
+ #endif
+ 
++#include <zephyr/dt-bindings/input/input-event-codes.h>
+ #include <drivers/input_processor.h>
+ #include <zmk/events/keycode_state_changed.h>
+ #include <zephyr/logging/log.h>
+@@ -21,6 +22,13 @@ struct tfs_config {
+     uint32_t keycodes[TFS_DIRS];
+     int32_t threshold;
+     int32_t axis_ratio;
++    /* Three-finger tap; disabled when tap_keycode is 0. */
++    uint16_t three_finger_code;
++    uint16_t click_codes[2];
++    uint32_t tap_keycode;
++    int32_t tap_max_ms;
++    int32_t tap_max_samples;
++    int32_t click_suppress_ms;
+ };
+ 
+ struct tfs_data {
+@@ -28,9 +36,40 @@ struct tfs_data {
+     bool fired;
+     /* Sample counts; one count per driver report, saturated well below overflow. */
+     uint16_t count[TFS_DIRS];
++    bool three_seen;
++    int64_t touch_start_ms;
++    /* Survives reset: hides tap/click events trailing a three-finger touch. */
++    int64_t click_suppress_until_ms;
+ };
+ 
+-static void reset(struct tfs_data *data) { *data = (struct tfs_data){0}; }
++static void tap(uint32_t keycode);
++
++static void reset(struct tfs_data *data) {
++    int64_t suppress = data->click_suppress_until_ms;
++    *data = (struct tfs_data){0};
++    data->click_suppress_until_ms = suppress;
++}
++
++static int32_t total_samples(const struct tfs_data *data) {
++    int32_t total = 0;
++    for (int i = 0; i < TFS_DIRS; i++) {
++        total += data->count[i];
++    }
++    return total;
++}
++
++static void finish_touch(const struct tfs_config *cfg, struct tfs_data *data) {
++    if (!data->touching || !data->three_seen) {
++        return;
++    }
++    int64_t now = k_uptime_get();
++    data->click_suppress_until_ms = now + cfg->click_suppress_ms;
++    if (cfg->tap_keycode && !data->fired && now - data->touch_start_ms <= cfg->tap_max_ms &&
++        total_samples(data) <= cfg->tap_max_samples) {
++        LOG_DBG("three-finger tap fired");
++        tap(cfg->tap_keycode);
++    }
++}
+ 
+ static int find_dir(const struct tfs_config *cfg, uint16_t code) {
+     for (int i = 0; i < TFS_DIRS; i++) {
+@@ -75,10 +114,26 @@ static int handle_event(const struct device *dev, struct input_event *event, uin
+     }
+     if (event->code == cfg->touch_code) {
+         if (!event->value) {
++            finish_touch(cfg, data);
+             reset(data);
+         } else if (!data->touching) {
+             reset(data);
+             data->touching = true;
++            data->touch_start_ms = k_uptime_get();
++        }
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    if (event->code == cfg->three_finger_code) {
++        if (event->value && data->touching) {
++            data->three_seen = true;
++        }
++        return ZMK_INPUT_PROC_STOP;
++    }
++    if (event->code == cfg->click_codes[0] || event->code == cfg->click_codes[1]) {
++        /* Hardware single/two-finger taps can accompany a three-finger touch. */
++        if ((data->touching && data->three_seen) ||
++            k_uptime_get() < data->click_suppress_until_ms) {
++            return ZMK_INPUT_PROC_STOP;
+         }
+         return ZMK_INPUT_PROC_CONTINUE;
+     }
+@@ -122,6 +177,12 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = handle
+                      DT_INST_PROP(n, up_keycode), DT_INST_PROP(n, down_keycode)},                  \
+         .threshold = DT_INST_PROP(n, threshold),                                                   \
+         .axis_ratio = DT_INST_PROP(n, axis_ratio),                                                 \
++        .three_finger_code = DT_INST_PROP(n, three_finger_code),                                   \
++        .click_codes = {INPUT_BTN_0, INPUT_BTN_1},                                                 \
++        .tap_keycode = DT_INST_PROP(n, tap_keycode),                                               \
++        .tap_max_ms = DT_INST_PROP(n, tap_max_ms),                                                 \
++        .tap_max_samples = DT_INST_PROP(n, tap_max_samples),                                       \
++        .click_suppress_ms = DT_INST_PROP(n, click_suppress_ms),                                   \
+     };                                                                                             \
+     DEVICE_DT_INST_DEFINE(n, NULL, NULL, &data_##n, &config_##n, POST_KERNEL,                      \
+                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
+-- 
+2.43.0
+
+
+From db450f16b8e4fb9fafce31928eee5f641fb3667a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:20:40 +0900
+Subject: [PATCH 3/7] Keep three-finger session until all fingers lift
+
+On the small round TPS43 an outer finger leaves the pad early in a horizontal
+swipe, so the gesture dropped to two fingers and never reached the threshold.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ modules/zmk-driver-azoteq-tps43/README.md   |  5 +++++
+ modules/zmk-driver-azoteq-tps43/src/tps43.c | 14 ++++++++++++--
+ modules/zmk-driver-azoteq-tps43/src/tps43.h |  2 ++
+ 3 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/modules/zmk-driver-azoteq-tps43/README.md b/modules/zmk-driver-azoteq-tps43/README.md
+index 27fa57f..cc484c7 100644
+--- a/modules/zmk-driver-azoteq-tps43/README.md
++++ b/modules/zmk-driver-azoteq-tps43/README.md
+@@ -21,3 +21,8 @@ listener transform affects only relative events, not these key codes.
+ Second change: the work handler reports key code 0x14e
+ (`TPS43_BTN_THREE_FINGERS`, Linux BTN_TOOL_TRIPLETAP) as 1 when exactly
+ three fingers are down and 0 when that ends, for three-finger tap detection.
++
++Third change: once three fingers are down, the touch stays a three-finger
++session until every finger lifts. Movement with fewer fingers in that session
++is still reported as three-finger direction events, not scroll or cursor
++motion, because an outer finger leaves the small pad early in horizontal swipes.
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.c b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+index dbc018a..131f831 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.c
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+@@ -456,6 +456,16 @@ static void tps43_work_handler(struct k_work *work) {
+         drv_data->three_fingers = three_fingers;
+         input_report_key(dev, TPS43_BTN_THREE_FINGERS, three_fingers ? 1 : 0, true, K_FOREVER);
+     }
++    /*
++     * Latch the three-finger session until every finger lifts. On the small
++     * round pad an outer finger leaves the surface early in a horizontal
++     * swipe, so the rest of that swipe must not fall back to scroll/cursor.
++     */
++    if (three_fingers) {
++        drv_data->three_finger_session = true;
++    } else if (num_fingers == 0) {
++        drv_data->three_finger_session = false;
++    }
+ 
+     if (gestures_events[0] != 0 || gestures_events[1] != 0) {
+ 
+@@ -500,9 +510,9 @@ static void tps43_work_handler(struct k_work *work) {
+     }
+ 
+     if (rel_x != 0 || rel_y != 0) {
+-        if (num_fingers == 3) {
++        if (num_fingers == 3 || drv_data->three_finger_session) {
+             LOG_INF("Three-finger movement - checking for swipe");
+-            tps43_handle_swipe(dev, num_fingers, rel_x, rel_y);
++            tps43_handle_swipe(dev, 3, rel_x, rel_y);
+         } else if (is_scroll_active) {
+             // Scroll processing: keep only dominant axis
+             if (abs(rel_x) > abs(rel_y)) {
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.h b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+index 31969b7..5363d76 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.h
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+@@ -273,6 +273,8 @@ struct tps43_drv_data {
+     bool touching;
+     /* Nickey44A: exactly three fingers currently reported. */
+     bool three_fingers;
++    /* Nickey44A: three fingers were down at some point in the current touch. */
++    bool three_finger_session;
+     int64_t last_three_finger_swipe_ms;
+ };
+ 
+-- 
+2.43.0
+
+
+From e73da5d6388f2e88e293564eda51926b42ff992e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:28:33 +0900
+Subject: [PATCH 4/7] Enable press-and-hold drag on right TPS43
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ boards/shields/nickey44a/nickey44a_r.overlay | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/boards/shields/nickey44a/nickey44a_r.overlay b/boards/shields/nickey44a/nickey44a_r.overlay
+index 42b8845..6a12137 100644
+--- a/boards/shields/nickey44a/nickey44a_r.overlay
++++ b/boards/shields/nickey44a/nickey44a_r.overlay
+@@ -148,6 +148,8 @@
+         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+ 
+         single-tap;
++        /* Touch and stay still for hold-time to press the left button; move to drag, lift to release. */
++        press-and-hold;
+         two-finger-tap;
+         scroll;
+         /* One driver event per three-finger sample; the processor fires once per touch. */
+-- 
+2.43.0
+
+
+From 6bb8f149a383082c0943c7970a25d1b203d713ed Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:39:05 +0900
+Subject: [PATCH 5/7] Add left-pad circle volume and right drag lock
+
+Left: drop press-and-hold, forward X/Y, and on the central turn one-finger
+circular motion into Volume Up/Down before zeroing X/Y. Right: drag-lock keeps
+a press-and-hold drag down after lift until the next tap. Update the dual
+TPS43 check script and docs (including the right NRST pin).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ CMakeLists.txt                                |   1 +
+ .../bindings/input/azoteq,tps43-common.yaml   |   8 +
+ .../input-processor-circle-keys.yaml          |  36 ++++
+ boards/shields/nickey44a/nickey44a_l.overlay  |  12 +-
+ boards/shields/nickey44a/nickey44a_r.overlay  |  27 ++-
+ docs/dual-tps43.md                            |  23 ++-
+ modules/zmk-driver-azoteq-tps43/README.md     |   4 +
+ modules/zmk-driver-azoteq-tps43/src/tps43.c   |  23 ++-
+ modules/zmk-driver-azoteq-tps43/src/tps43.h   |   4 +
+ .../CMakeLists.txt                            |   1 +
+ .../zmk-input-processor-circle-keys/README.md |  16 ++
+ .../input-processor-circle-keys.yaml          |  36 ++++
+ .../src/input_processor_circle_keys.c         | 161 ++++++++++++++++++
+ scripts/check_dual_tps43.py                   |  78 +++++----
+ 14 files changed, 379 insertions(+), 51 deletions(-)
+ create mode 100644 boards/shields/nickey44a/dts/bindings/input/processor/input-processor-circle-keys.yaml
+ create mode 100644 modules/zmk-input-processor-circle-keys/CMakeLists.txt
+ create mode 100644 modules/zmk-input-processor-circle-keys/README.md
+ create mode 100644 modules/zmk-input-processor-circle-keys/dts/bindings/input/processor/input-processor-circle-keys.yaml
+ create mode 100644 modules/zmk-input-processor-circle-keys/src/input_processor_circle_keys.c
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 00ecadd..004613f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -4,3 +4,4 @@ add_subdirectory(modules/zmk-input-processor-touch-swipe)
+ # Vendored TPS43 driver (replaces the geeksville west project; see its README).
+ add_subdirectory(modules/zmk-driver-azoteq-tps43)
+ add_subdirectory(modules/zmk-input-processor-three-finger-swipe)
++add_subdirectory(modules/zmk-input-processor-circle-keys)
+diff --git a/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
+index 6ad1e04..bceef59 100644
+--- a/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
++++ b/boards/shields/nickey44a/dts/bindings/input/azoteq,tps43-common.yaml
+@@ -158,6 +158,14 @@ properties:
+     required: false
+     description: Enable press and hold gesture
+ 
++  drag-lock:
++    type: boolean
++    required: false
++    description: >
++      Nickey44A local option. After a press-and-hold drag the left button stays
++      pressed when the finger lifts; the next single tap releases it without
++      clicking, and another press-and-hold continues the same drag.
++
+   invert-x:
+     type: boolean
+     description: If present, invert X coordinate values.
+diff --git a/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-circle-keys.yaml b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-circle-keys.yaml
+new file mode 100644
+index 0000000..5efe2a5
+--- /dev/null
++++ b/boards/shields/nickey44a/dts/bindings/input/processor/input-processor-circle-keys.yaml
+@@ -0,0 +1,36 @@
++description: Tap a ZMK keycode for each step of circular one-finger motion
++compatible: "zmk,input-processor-circle-keys"
++include: ip_zero_param.yaml
++properties:
++  x-code:
++    type: int
++    required: true
++  y-code:
++    type: int
++    required: true
++  touch-code:
++    type: int
++    required: true
++  segment-distance:
++    type: int
++    default: 12
++    description: Positive motion length, in REL units, accumulated into one direction segment.
++  step-degrees:
++    type: int
++    default: 45
++    description: Positive accumulated turning angle per keycode tap.
++  max-turn-degrees:
++    type: int
++    default: 90
++    description: A larger turn between two segments is treated as a corner or jitter and ignored.
++  idle-reset-ms:
++    type: int
++    default: 200
++    description: Motion gap after which direction history restarts.
++  clockwise-keycode:
++    type: int
++    required: true
++    description: Encoded ZMK keycode tapped per clockwise step (X right, Y down).
++  counterclockwise-keycode:
++    type: int
++    required: true
+diff --git a/boards/shields/nickey44a/nickey44a_l.overlay b/boards/shields/nickey44a/nickey44a_l.overlay
+index 66a9489..0aed116 100644
+--- a/boards/shields/nickey44a/nickey44a_l.overlay
++++ b/boards/shields/nickey44a/nickey44a_l.overlay
+@@ -62,9 +62,12 @@
+             compatible = "zmk,input-split";
+             reg = <0>;
+             device = <&left_tps43>;
+-            /* Block native HWHEEL before mapping WHEEL to HWHEEL. */
+-            input-processors = <&zip_xy_scaler 0 1>,
+-                               <&left_hwheel_blocker 0 1>,
++            /*
++             * Block native HWHEEL before mapping WHEEL to HWHEEL. X/Y are
++             * forwarded unchanged: the central detects circular motion for
++             * volume, then zeroes X/Y so the left pad never moves the cursor.
++             */
++            input-processors = <&left_hwheel_blocker 0 1>,
+                                <&left_wheel_to_hwheel>,
+                                <&left_middle_click_mapper>;
+         };
+@@ -87,7 +90,7 @@
+         rst-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+ 
+-        press-and-hold;
++        /* No press-and-hold: one-finger motion is the volume circle. */
+         two-finger-tap;
+         scroll;
+         /* Reverse vertical gestures before WHEEL is mapped to HWHEEL. */
+@@ -97,7 +100,6 @@
+         filter-dynamic-bottom = <5>;
+         sensitivity = <100>;
+         scroll-sensitivity = <5>;
+-        hold-time = <1>;
+         enable-power-management;
+         /* Keep physical vertical motion on WHEEL: no controller XY swap. */
+         invert-x;
+diff --git a/boards/shields/nickey44a/nickey44a_r.overlay b/boards/shields/nickey44a/nickey44a_r.overlay
+index 6a12137..f0c5af5 100644
+--- a/boards/shields/nickey44a/nickey44a_r.overlay
++++ b/boards/shields/nickey44a/nickey44a_r.overlay
+@@ -45,9 +45,30 @@
+         };
+     };
+ 
++    /*
++     * Left pad: one-finger circular motion changes the volume (clockwise =
++     * up, 45 degrees per step). If the direction feels reversed on hardware,
++     * swap the two keycodes.
++     */
++    left_circle_volume: left_circle_volume {
++        compatible = "zmk,input-processor-circle-keys";
++        #input-processor-cells = <0>;
++        x-code = <INPUT_REL_X>;
++        y-code = <INPUT_REL_Y>;
++        touch-code = <INPUT_BTN_TOUCH>;
++        segment-distance = <12>;
++        step-degrees = <45>;
++        max-turn-degrees = <90>;
++        idle-reset-ms = <200>;
++        clockwise-keycode = <C_VOL_UP>;
++        counterclockwise-keycode = <C_VOL_DN>;
++    };
++
+     left_tps43_listener: left_tps43_listener {
+         compatible = "zmk,input-listener";
+         device = <&left_tps43_split>;
++        /* Observe the circle, then zero X/Y: the left pad never moves the cursor. */
++        input-processors = <&left_circle_volume>, <&zip_xy_scaler 0 1>;
+     };
+ 
+     tps43_orientation: tps43_orientation {
+@@ -148,8 +169,12 @@
+         rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+ 
+         single-tap;
+-        /* Touch and stay still for hold-time to press the left button; move to drag, lift to release. */
++        /*
++         * Touch and stay still for hold-time to press the left button and drag.
++         * drag-lock keeps it pressed after lift; the next single tap releases.
++         */
+         press-and-hold;
++        drag-lock;
+         two-finger-tap;
+         scroll;
+         /* One driver event per three-finger sample; the processor fires once per touch. */
+diff --git a/docs/dual-tps43.md b/docs/dual-tps43.md
+index 05df846..8f09ba8 100644
+--- a/docs/dual-tps43.md
++++ b/docs/dual-tps43.md
+@@ -1,14 +1,15 @@
+ # Nickey44A-PAD: 左右TPS43
+ 
+ 右central／左peripheral。左右ともSDA=P0.09、SCL=P0.10、RDY=P1.10、
+-NRST=P0.16、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるため、
++NRST=左P0.16／右P1.00、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるため、
+ アドレスは同じでよい。westのrevision、ZMK本体、Azoteqドライバーは変更しない。
+ 
+ ## イベント経路
+ 
+ ```text
+ 左TPS43 → 左input-splitの標準processors → BLE split (reg=0)
+-        → 右input-split proxy (reg=0) → 左専用input-listener → 共通HID
++        → 右input-split proxy (reg=0) → 左専用input-listener
++        → 音量サークル検出 → X/Y 0化 → 共通HID
+ 右TPS43 → 既存の右input-listener → 既存orientation/swipe/inertia/Snipe → 共通HID
+ ```
+ 
+@@ -16,16 +17,19 @@ NRST=P0.16、I2Cアドレス=0x74。各MCUに独立したI2Cバスがあるた
+ 
+ | 順序 | Processor | 結果 |
+ |---|---|---|
+-| 1 | `zip_xy_scaler 0 1` | REL_X/Yを0化 |
+-| 2 | `left_hwheel_blocker 0 1` | 元のREL_HWHEELを0化 |
+-| 3 | `left_wheel_to_hwheel` | REL_WHEELをREL_HWHEELへ変換、値と符号は保持 |
+-| 4 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
++| 1 | `left_hwheel_blocker 0 1` | 元のREL_HWHEELを0化 |
++| 2 | `left_wheel_to_hwheel` | REL_WHEELをREL_HWHEELへ変換、値と符号は保持 |
++| 3 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
++
++REL_X/Yは変換せずに転送する。右の左専用listenerで`left_circle_volume`が
++一本指の回転を検出し（時計回り=音量アップ、45度ごとに1段）、続く
++`zip_xy_scaler 0 1`でX/Yを0化するため、左パッドでカーソルは動かない。
+ 
+ 左TPS43の`invert-scroll-y`でWHEELの符号を反転してからHWHEELへ変換する。
+ 上下スワイプによる水平スクロール方向は、初期のデュアルTPS43設定と逆になる。
+ 
+-BTN_0は変換しない。左はsingle-tapを有効にせず、press-and-hold、
+-two-finger-tap、scrollのみ有効。hold-time=80ms。
++BTN_0は変換しない。左はsingle-tapとpress-and-holdを有効にせず、
++two-finger-tapとscrollのみ有効。一本指の動きは音量サークル専用。
+ 標準scalerはイベントを破棄せず値を0にするため、X/Yと元HWHEELの
+ BLE通知件数は減らない。sync情報もそのまま転送される。
+ 
+@@ -35,7 +39,8 @@ invert-xは維持する。左に追加のorientation processorはない。
+ 同じ物理向きの実装を前提とした設定であり、左の取り付け向きと実機の
+ 上下・左右判定は下記手順で確認する。
+ 
+-右TPS43の変更はpress-and-holdの削除だけ。既存のタップ、スクロール、
++右TPS43はpress-and-holdとdrag-lock（離しても押下維持、次のタップで解除）、
++三本指スワイプ／タップを有効にしている。既存のタップ、スクロール、
+ swipe、inertia、orientation、Layer 1 Snipe、感度、電源管理、RST/RDYは維持。
+ 固定ZMKのHIDはボタン押下をカウントするため、右の移動イベントは左の
+ BTN_0保持を解除しない。左保持中の右タップも、タップ終了後に左の押下が残る。
+diff --git a/modules/zmk-driver-azoteq-tps43/README.md b/modules/zmk-driver-azoteq-tps43/README.md
+index cc484c7..be92e60 100644
+--- a/modules/zmk-driver-azoteq-tps43/README.md
++++ b/modules/zmk-driver-azoteq-tps43/README.md
+@@ -26,3 +26,7 @@ Third change: once three fingers are down, the touch stays a three-finger
+ session until every finger lifts. Movement with fewer fingers in that session
+ is still reported as three-finger direction events, not scroll or cursor
+ motion, because an outer finger leaves the small pad early in horizontal swipes.
++
++Fourth change: optional `drag-lock` property. After a press-and-hold drag the
++left button stays pressed when the finger lifts. The next single tap releases
++it without clicking; another press-and-hold continues the same drag.
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.c b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+index 131f831..d0ca1b8 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.c
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.c
+@@ -471,7 +471,12 @@ static void tps43_work_handler(struct k_work *work) {
+ 
+         LOG_INF("Gestures: Single=0x%02X, Multi=0x%02X", gestures_events[0], gestures_events[1]);
+ 
+-        if (gestures_events[0] & TPS43_SINGLE_TAP) {
++        if ((gestures_events[0] & TPS43_SINGLE_TAP) && drv_data->drag_locked) {
++            /* Nickey44A drag lock: the next tap only ends the locked drag. */
++            LOG_INF("Single tap → END DRAG LOCK (RELEASE LEFT BUTTON)");
++            drv_data->drag_locked = false;
++            input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
++        } else if (gestures_events[0] & TPS43_SINGLE_TAP) {
+             LOG_INF("Single tap → LEFT BUTTON");
+             input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
+             input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+@@ -489,7 +494,12 @@ static void tps43_work_handler(struct k_work *work) {
+             LOG_INF("Press and hold detected - DRAG (HOLD LEFT BUTTON)");
+             // set internal drag flag and press left mouse button
+             is_drag_active = true;
+-            input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
++            if (drv_data->drag_locked) {
++                /* Holding again while locked continues the same drag. */
++                drv_data->drag_locked = false;
++            } else {
++                input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
++            }
+         }
+         if (gestures_events[1] & TPS43_SCROLL) {
+             // set scroll flag for processing in tp_movement block
+@@ -506,7 +516,13 @@ static void tps43_work_handler(struct k_work *work) {
+         LOG_INF("Press and hold end detected - RELEASE (RELEASE LEFT BUTTON)");
+         // release drag flag and release left mouse button
+         is_drag_active = false;
+-        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);   // release + sync
++        if (config->drag_lock) {
++            /* Nickey44A drag lock: keep the button down until the next tap. */
++            LOG_INF("Press and hold end - DRAG LOCKED (LEFT BUTTON STAYS DOWN)");
++            drv_data->drag_locked = true;
++        } else {
++            input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);   // release + sync
++        }
+     }
+ 
+     if (rel_x != 0 || rel_y != 0) {
+@@ -1477,6 +1493,7 @@ static int tps43_init(const struct device *dev) {
+         .rst_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, rst_gpios, {0}),                                  \
+         .single_tap = DT_INST_PROP(inst, single_tap),                                                \
+         .press_and_hold = DT_INST_PROP(inst, press_and_hold),                                        \
++        .drag_lock = DT_INST_PROP(inst, drag_lock),                                        \
+         .two_finger_tap = DT_INST_PROP(inst, two_finger_tap),                                        \
+         .scroll = DT_INST_PROP(inst, scroll),                                                        \
+         .zoom = DT_INST_PROP(inst, zoom),                                                            \
+diff --git a/modules/zmk-driver-azoteq-tps43/src/tps43.h b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+index 5363d76..dfd8273 100644
+--- a/modules/zmk-driver-azoteq-tps43/src/tps43.h
++++ b/modules/zmk-driver-azoteq-tps43/src/tps43.h
+@@ -204,6 +204,8 @@ struct tps43_config {
+ 
+     bool single_tap;
+     bool press_and_hold;
++    /* Nickey44A: keep a press-and-hold drag down after lift until the next tap. */
++    bool drag_lock;
+     bool two_finger_tap;
+     bool scroll;
+     bool zoom;
+@@ -275,6 +277,8 @@ struct tps43_drv_data {
+     bool three_fingers;
+     /* Nickey44A: three fingers were down at some point in the current touch. */
+     bool three_finger_session;
++    /* Nickey44A: left button held by drag lock after the finger lifted. */
++    bool drag_locked;
+     int64_t last_three_finger_swipe_ms;
+ };
+ 
+diff --git a/modules/zmk-input-processor-circle-keys/CMakeLists.txt b/modules/zmk-input-processor-circle-keys/CMakeLists.txt
+new file mode 100644
+index 0000000..310874c
+--- /dev/null
++++ b/modules/zmk-input-processor-circle-keys/CMakeLists.txt
+@@ -0,0 +1 @@
++target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/input_processor_circle_keys.c)
+diff --git a/modules/zmk-input-processor-circle-keys/README.md b/modules/zmk-input-processor-circle-keys/README.md
+new file mode 100644
+index 0000000..01ab9ff
+--- /dev/null
++++ b/modules/zmk-input-processor-circle-keys/README.md
+@@ -0,0 +1,16 @@
++# Circle keys
++
++Local MIT-licensed processor. It observes one-finger REL_X/REL_Y on a
++central-side listener and taps `clockwise-keycode` or
++`counterclockwise-keycode` for every `step-degrees` of accumulated turning.
++Motion is grouped into segments of `segment-distance`; the heading change
++between consecutive segments is summed. A change larger than
++`max-turn-degrees` (corner or reversal) clears the sum, so straight lines and
++zigzags do not fire. TOUCH events and a motion gap of `idle-reset-ms` reset
++all state. Events always continue unchanged; Nickey44A zeroes X/Y afterwards.
++
++Coordinates are host-style (X right, Y down), so a positive heading change is
++clockwise. Nickey44A maps the left pad to C_VOL_UP (clockwise) and C_VOL_DN.
++If the direction is reversed on hardware, swap the keycodes. Lower
++step-degrees for faster volume changes; raise segment-distance if jitter
++fires steps. The binding is mirrored in the shield's dts/bindings directory.
+diff --git a/modules/zmk-input-processor-circle-keys/dts/bindings/input/processor/input-processor-circle-keys.yaml b/modules/zmk-input-processor-circle-keys/dts/bindings/input/processor/input-processor-circle-keys.yaml
+new file mode 100644
+index 0000000..5efe2a5
+--- /dev/null
++++ b/modules/zmk-input-processor-circle-keys/dts/bindings/input/processor/input-processor-circle-keys.yaml
+@@ -0,0 +1,36 @@
++description: Tap a ZMK keycode for each step of circular one-finger motion
++compatible: "zmk,input-processor-circle-keys"
++include: ip_zero_param.yaml
++properties:
++  x-code:
++    type: int
++    required: true
++  y-code:
++    type: int
++    required: true
++  touch-code:
++    type: int
++    required: true
++  segment-distance:
++    type: int
++    default: 12
++    description: Positive motion length, in REL units, accumulated into one direction segment.
++  step-degrees:
++    type: int
++    default: 45
++    description: Positive accumulated turning angle per keycode tap.
++  max-turn-degrees:
++    type: int
++    default: 90
++    description: A larger turn between two segments is treated as a corner or jitter and ignored.
++  idle-reset-ms:
++    type: int
++    default: 200
++    description: Motion gap after which direction history restarts.
++  clockwise-keycode:
++    type: int
++    required: true
++    description: Encoded ZMK keycode tapped per clockwise step (X right, Y down).
++  counterclockwise-keycode:
++    type: int
++    required: true
+diff --git a/modules/zmk-input-processor-circle-keys/src/input_processor_circle_keys.c b/modules/zmk-input-processor-circle-keys/src/input_processor_circle_keys.c
+new file mode 100644
+index 0000000..85b1ecf
+--- /dev/null
++++ b/modules/zmk-input-processor-circle-keys/src/input_processor_circle_keys.c
+@@ -0,0 +1,161 @@
++/* SPDX-License-Identifier: MIT */
++#define DT_DRV_COMPAT zmk_input_processor_circle_keys
++#include <zephyr/device.h>
++#include <zephyr/kernel.h>
++
++#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
++#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
++#error "circle-keys requires a central-side devicetree instance"
++#endif
++
++#include <math.h>
++#include <drivers/input_processor.h>
++#include <zmk/events/keycode_state_changed.h>
++#include <zephyr/logging/log.h>
++LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
++
++struct circle_config {
++    uint16_t x_code;
++    uint16_t y_code;
++    uint16_t touch_code;
++    int32_t segment_distance;
++    float step_degrees;
++    float max_turn_degrees;
++    int32_t idle_reset_ms;
++    uint32_t cw_keycode;
++    uint32_t ccw_keycode;
++};
++
++struct circle_data {
++    /* Motion of the current driver report, completed by the sync event. */
++    int32_t pending_x;
++    int32_t pending_y;
++    /* Motion accumulated into the segment being built. */
++    int32_t seg_x;
++    int32_t seg_y;
++    bool have_heading;
++    float heading;
++    float turn;
++    int64_t last_motion_ms;
++};
++
++static void reset_motion(struct circle_data *data) { *data = (struct circle_data){0}; }
++
++static void tap(uint32_t keycode) {
++    int64_t timestamp = k_uptime_get();
++    int press = raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
++    int release = raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
++    if (press < 0 || release < 0) {
++        LOG_WRN("circle key output failed: %d/%d", press, release);
++    }
++}
++
++static void add_sample(const struct circle_config *cfg, struct circle_data *data, int32_t dx,
++                       int32_t dy) {
++    int64_t now = k_uptime_get();
++    if (data->last_motion_ms && now - data->last_motion_ms > cfg->idle_reset_ms) {
++        reset_motion(data);
++    }
++    data->last_motion_ms = now;
++    data->seg_x = CLAMP(data->seg_x + dx, -32768, 32767);
++    data->seg_y = CLAMP(data->seg_y + dy, -32768, 32767);
++
++    int64_t len2 = (int64_t)data->seg_x * data->seg_x + (int64_t)data->seg_y * data->seg_y;
++    if (len2 < (int64_t)cfg->segment_distance * cfg->segment_distance) {
++        return;
++    }
++
++    /* Screen coordinates: X right, Y down, so a positive angle change is clockwise. */
++    float heading = atan2f((float)data->seg_y, (float)data->seg_x) * (180.0f / 3.14159265f);
++    data->seg_x = 0;
++    data->seg_y = 0;
++    if (!data->have_heading) {
++        data->have_heading = true;
++        data->heading = heading;
++        return;
++    }
++
++    float delta = heading - data->heading;
++    if (delta > 180.0f) {
++        delta -= 360.0f;
++    } else if (delta <= -180.0f) {
++        delta += 360.0f;
++    }
++    data->heading = heading;
++    if (fabsf(delta) > cfg->max_turn_degrees) {
++        /* A sharp corner or reversal is not circular motion. */
++        data->turn = 0.0f;
++        return;
++    }
++
++    data->turn += delta;
++    while (data->turn >= cfg->step_degrees) {
++        data->turn -= cfg->step_degrees;
++        tap(cfg->cw_keycode);
++    }
++    while (data->turn <= -cfg->step_degrees) {
++        data->turn += cfg->step_degrees;
++        tap(cfg->ccw_keycode);
++    }
++}
++
++static int handle_event(const struct device *dev, struct input_event *event, uint32_t param1,
++                        uint32_t param2, struct zmk_input_processor_state *state) {
++    ARG_UNUSED(param1);
++    ARG_UNUSED(param2);
++    ARG_UNUSED(state);
++    struct circle_data *data = dev->data;
++    const struct circle_config *cfg = dev->config;
++
++    if (event->type == INPUT_EV_KEY && event->code == cfg->touch_code) {
++        reset_motion(data);
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    if (event->type != INPUT_EV_REL) {
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    if (event->code == cfg->x_code) {
++        data->pending_x += event->value;
++    } else if (event->code == cfg->y_code) {
++        data->pending_y += event->value;
++    } else {
++        return ZMK_INPUT_PROC_CONTINUE;
++    }
++    if (event->sync) {
++        int32_t dx = data->pending_x;
++        int32_t dy = data->pending_y;
++        data->pending_x = 0;
++        data->pending_y = 0;
++        if (dx || dy) {
++            add_sample(cfg, data, dx, dy);
++        }
++    }
++    /* Observe only; a later processor decides whether the cursor moves. */
++    return ZMK_INPUT_PROC_CONTINUE;
++}
++
++static const struct zmk_input_processor_driver_api api = {.handle_event = handle_event};
++
++#define CREATE_INSTANCE(n)                                                                         \
++    BUILD_ASSERT(DT_INST_PROP(n, segment_distance) > 0, "segment-distance must be positive");     \
++    BUILD_ASSERT(DT_INST_PROP(n, step_degrees) > 0, "step-degrees must be positive");             \
++    BUILD_ASSERT(DT_INST_PROP(n, max_turn_degrees) > 0 &&                                          \
++                     DT_INST_PROP(n, max_turn_degrees) < 180,                                      \
++                 "max-turn-degrees must be in 1..179");                                            \
++    static struct circle_data data_##n;                                                            \
++    static const struct circle_config config_##n = {                                               \
++        .x_code = DT_INST_PROP(n, x_code),                                                         \
++        .y_code = DT_INST_PROP(n, y_code),                                                         \
++        .touch_code = DT_INST_PROP(n, touch_code),                                                 \
++        .segment_distance = DT_INST_PROP(n, segment_distance),                                     \
++        .step_degrees = (float)DT_INST_PROP(n, step_degrees),                                      \
++        .max_turn_degrees = (float)DT_INST_PROP(n, max_turn_degrees),                              \
++        .idle_reset_ms = DT_INST_PROP(n, idle_reset_ms),                                           \
++        .cw_keycode = DT_INST_PROP(n, clockwise_keycode),                                          \
++        .ccw_keycode = DT_INST_PROP(n, counterclockwise_keycode),                                  \
++    };                                                                                             \
++    DEVICE_DT_INST_DEFINE(n, NULL, NULL, &data_##n, &config_##n, POST_KERNEL,                      \
++                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
++
++DT_INST_FOREACH_STATUS_OKAY(CREATE_INSTANCE)
++#endif
+diff --git a/scripts/check_dual_tps43.py b/scripts/check_dual_tps43.py
+index 5c3d2ca..6a047e8 100644
+--- a/scripts/check_dual_tps43.py
++++ b/scripts/check_dual_tps43.py
+@@ -1,4 +1,4 @@
+-"""Check built Devicetrees/configs and model the standard left processor chain.
++"""Check built Devicetrees/configs and model the left pad processor chains.
+ 
+ Run with the Python environment used by west. This checks configuration and
+ event semantics; it does not simulate BLE, TPS43 silicon, or host HID timing.
+@@ -59,8 +59,10 @@ def main():
+     rt = right.label2node["tps43"]
+     for dt, node in ((left, lt), (right, rt)):
+         assert node.props["reg"].to_nums() == [0x74]
++        # NRST: left P0.16, right P1.00.
++        rst_port, rst_pin = ("gpio0", 16) if dt is left else ("gpio1", 0)
+         assert cells_of(node.props["rst-gpios"]) == [
+-            dt.label2node["gpio0"].props["phandle"].to_num(), 16, 0]
++            dt.label2node[rst_port].props["phandle"].to_num(), rst_pin, 0]
+         assert cells_of(node.props["rdy-gpios"]) == [
+             dt.label2node["gpio1"].props["phandle"].to_num(), 10, 0]
+         assert enabled(node, "enable-power-management")
+@@ -77,14 +79,17 @@ def main():
+                     values = cells_of(prop)
+                     for index in range(0, len(values), 3):
+                         if values[index:index + 2] == [gpio0, 16]:
+-                            assert candidate is node and prop.name == "rst-gpios"
++                            assert dt is left and candidate is node and \
++                                prop.name == "rst-gpios"
+                 if prop.name == "psels":
+                     assert all(v & 0x1ff != 16 for v in prop.to_nums())
+-    assert enabled(lt, "press-and-hold") and not enabled(lt, "single-tap")
++    # Left: one-finger motion is the volume circle, so no press-and-hold.
++    assert not enabled(lt, "press-and-hold") and not enabled(lt, "single-tap")
+     assert not enabled(lt, "switch-xy")
+-    assert lt.props["hold-time"].to_num() == 80
+-    assert not enabled(rt, "press-and-hold")
+-    for name in ("single-tap", "two-finger-tap", "scroll", "switch-xy", "invert-x"):
++    assert "hold-time" not in lt.props
++    # Right: press-and-hold drag and three-finger gestures.
++    for name in ("single-tap", "press-and-hold", "two-finger-tap", "scroll", "switch-xy",
++                 "invert-x", "three-finger-swipe"):
+         assert enabled(rt, name), name
+     assert enabled(lt, "two-finger-tap") and enabled(lt, "scroll")
+ 
+@@ -95,25 +100,36 @@ def main():
+     assert "device" not in rs.props
+     listener = right.label2node["left_tps43_listener"]
+     assert listener.props["device"].to_node() is rs
+-    assert "input-processors" not in listener.props
+-
+-    chain, cells = [], cells_of(ls.props["input-processors"])
+-    while cells:
+-        node = left.phandle2node[cells.pop(0)]
+-        count = node.props["#input-processor-cells"].to_num()
+-        chain.append((node, cells[:count]))
+-        del cells[:count]
+-    assert [n.name for n, _ in chain] == [
+-        "zip_xy_scaler", "left_hwheel_blocker", "left_wheel_to_hwheel",
+-        "left_middle_click_mapper"]
+-    assert [params for _, params in chain] == [[0, 1], [0, 1], [], []]
++
++    def chain_of(dt, node):
++        chain, cells = [], cells_of(node.props["input-processors"])
++        while cells:
++            proc = dt.phandle2node[cells.pop(0)]
++            count = proc.props["#input-processor-cells"].to_num()
++            chain.append((proc, cells[:count]))
++            del cells[:count]
++        return chain
++
++    left_chain = chain_of(left, ls)
++    assert [n.name for n, _ in left_chain] == [
++        "left_hwheel_blocker", "left_wheel_to_hwheel", "left_middle_click_mapper"]
++    assert [params for _, params in left_chain] == [[0, 1], [], []]
++    central_chain = chain_of(right, listener)
++    assert [n.name for n, _ in central_chain] == ["left_circle_volume", "zip_xy_scaler"]
++    assert [params for _, params in central_chain] == [[], [0, 1]]
++    circle = central_chain[0][0]
++    assert circle.props["x-code"].to_num() == c["INPUT_REL_X"]
++    assert circle.props["y-code"].to_num() == c["INPUT_REL_Y"]
++    chain = left_chain + central_chain
+ 
+     def process(kind, code, value, sync=True):
+         # Model the pinned standard processors using the actual built properties.
+         for node, params in chain:
++            compatible = node.props["compatible"].to_string()
++            if compatible == "zmk,input-processor-circle-keys":
++                continue  # Observes X/Y and touch only; never changes or stops events.
+             if kind != node.props["type"].to_num():
+                 continue
+-            compatible = node.props["compatible"].to_string()
+             if compatible == "zmk,input-processor-scaler":
+                 if code in node.props["codes"].to_nums():
+                     value = int(value * params[0] / params[1])
+@@ -137,21 +153,17 @@ def main():
+         assert process(key, c["INPUT_BTN_1"], value) == (key, c["INPUT_BTN_2"], value, True)
+         assert process(key, c["INPUT_BTN_0"], value) == (key, c["INPUT_BTN_0"], value, True)
+     assert process(rel, c["INPUT_REL_X"], 25, False)[3] is False
+-
+-    # Model the shared HID reference count: left hold + right tap + movement.
+-    count = 0
+-    for value, expected in ((1, 1), (1, 2), (0, 1)):
+-        assert process(key, c["INPUT_BTN_0"], value)[2] == value
+-        count += 1 if value else -1
+-        assert count == expected
+-    for _ in range(100):
+-        assert process(rel, c["INPUT_REL_X"], 5)[2] == 0
+-        assert count == 1  # Right movement sends no button release.
+-    count -= 1
+-    assert count == 0
++    # X/Y cross BLE unchanged so the central circle processor sees real motion.
++    for code in ("INPUT_REL_X", "INPUT_REL_Y"):
++        value = 25
++        for node, params in left_chain:
++            if node.props["compatible"].to_string() == "zmk,input-processor-scaler" and \
++                    c[code] in node.props["codes"].to_nums():
++                value = int(value * params[0] / params[1])
++        assert value == 25, code
+     print("PASS: built pins, gestures, split routing, roles, battery/sleep/Studio config")
+     print("PASS: processor order, signed motion blocking, wheel/button mapping, sync")
+-    print("PASS: event model preserves left hold through movement and a right tap")
++    print("PASS: left X/Y reach the central volume circle and never move the cursor")
+     print("Hardware/BLE/Deep Sleep acceptance tests remain manual.")
+ 
+ 
+-- 
+2.43.0
+
+
+From a05fe2731ae3952d0c33a63a1466bb9c38aa621b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:50:46 +0900
+Subject: [PATCH 6/7] Move Back/Forward to left-pad horizontal swipes; right
+ scrolls horizontally
+
+Left: two-finger left/right swipe taps Back/Forward once per touch; vertical
+two-finger motion is blocked. Right: two-finger left/right is plain
+horizontal scroll. Update the check script and docs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ boards/shields/nickey44a/nickey44a_l.overlay | 27 +++---------
+ boards/shields/nickey44a/nickey44a_r.overlay | 46 +++++++++++++-------
+ docs/dual-tps43.md                           | 24 +++++-----
+ scripts/check_dual_tps43.py                  | 29 +++++++-----
+ 4 files changed, 69 insertions(+), 57 deletions(-)
+
+diff --git a/boards/shields/nickey44a/nickey44a_l.overlay b/boards/shields/nickey44a/nickey44a_l.overlay
+index 0aed116..0ab0cdf 100644
+--- a/boards/shields/nickey44a/nickey44a_l.overlay
++++ b/boards/shields/nickey44a/nickey44a_l.overlay
+@@ -33,20 +33,6 @@
+ };
+ 
+ / {
+-    left_hwheel_blocker: left_hwheel_blocker {
+-        compatible = "zmk,input-processor-scaler";
+-        #input-processor-cells = <2>;
+-        type = <INPUT_EV_REL>;
+-        codes = <INPUT_REL_HWHEEL>;
+-    };
+-
+-    left_wheel_to_hwheel: left_wheel_to_hwheel {
+-        compatible = "zmk,input-processor-code-mapper";
+-        #input-processor-cells = <0>;
+-        type = <INPUT_EV_REL>;
+-        map = <INPUT_REL_WHEEL INPUT_REL_HWHEEL>;
+-    };
+-
+     left_middle_click_mapper: left_middle_click_mapper {
+         compatible = "zmk,input-processor-code-mapper";
+         #input-processor-cells = <0>;
+@@ -63,13 +49,12 @@
+             reg = <0>;
+             device = <&left_tps43>;
+             /*
+-             * Block native HWHEEL before mapping WHEEL to HWHEEL. X/Y are
+-             * forwarded unchanged: the central detects circular motion for
+-             * volume, then zeroes X/Y so the left pad never moves the cursor.
++             * X/Y, WHEEL and HWHEEL are forwarded unchanged. The central turns
++             * one-finger circles into volume and two-finger left/right swipes
++             * into Back/Forward, then zeroes the rest: the left pad never
++             * moves the cursor or scrolls.
+              */
+-            input-processors = <&left_hwheel_blocker 0 1>,
+-                               <&left_wheel_to_hwheel>,
+-                               <&left_middle_click_mapper>;
++            input-processors = <&left_middle_click_mapper>;
+         };
+     };
+ };
+@@ -93,7 +78,7 @@
+         /* No press-and-hold: one-finger motion is the volume circle. */
+         two-finger-tap;
+         scroll;
+-        /* Reverse vertical gestures before WHEEL is mapped to HWHEEL. */
++        /* Vertical two-finger scroll is blocked on the central; kept for reference. */
+         invert-scroll-y;
+ 
+         filter-settings = <0x0B>;
+diff --git a/boards/shields/nickey44a/nickey44a_r.overlay b/boards/shields/nickey44a/nickey44a_r.overlay
+index f0c5af5..304baa5 100644
+--- a/boards/shields/nickey44a/nickey44a_r.overlay
++++ b/boards/shields/nickey44a/nickey44a_r.overlay
+@@ -64,11 +64,39 @@
+         counterclockwise-keycode = <C_VOL_DN>;
+     };
+ 
++    /*
++     * Left pad: one Back/Forward per two-finger left/right swipe. If the
++     * direction is reversed on hardware, swap the two keycodes.
++     */
++    left_touch_swipe: left_touch_swipe {
++        compatible = "zmk,input-processor-touch-swipe";
++        #input-processor-cells = <0>;
++        hwheel-code = <INPUT_REL_HWHEEL>;
++        wheel-code = <INPUT_REL_WHEEL>;
++        touch-code = <INPUT_BTN_TOUCH>;
++        threshold = <8>;
++        axis-ratio = <2>;
++        left-keycode = <C_AC_BACK>;
++        right-keycode = <C_AC_FORWARD>;
++    };
++
++    /* Left pad: vertical two-finger scroll does nothing. */
++    left_wheel_blocker: left_wheel_blocker {
++        compatible = "zmk,input-processor-scaler";
++        #input-processor-cells = <2>;
++        type = <INPUT_EV_REL>;
++        codes = <INPUT_REL_WHEEL>;
++    };
++
+     left_tps43_listener: left_tps43_listener {
+         compatible = "zmk,input-listener";
+         device = <&left_tps43_split>;
+-        /* Observe the circle, then zero X/Y: the left pad never moves the cursor. */
+-        input-processors = <&left_circle_volume>, <&zip_xy_scaler 0 1>;
++        /*
++         * Observe the circle, turn HWHEEL into Back/Forward (touch-swipe always
++         * consumes HWHEEL), then zero WHEEL and X/Y.
++         */
++        input-processors = <&left_circle_volume>, <&left_touch_swipe>,
++                           <&left_wheel_blocker 0 1>, <&zip_xy_scaler 0 1>;
+     };
+ 
+     tps43_orientation: tps43_orientation {
+@@ -79,17 +107,6 @@
+         y-codes = <INPUT_REL_Y INPUT_REL_WHEEL>;
+     };
+ 
+-    tps43_touch_swipe: tps43_touch_swipe {
+-        compatible = "zmk,input-processor-touch-swipe";
+-        #input-processor-cells = <0>;
+-        hwheel-code = <INPUT_REL_HWHEEL>;
+-        wheel-code = <INPUT_REL_WHEEL>;
+-        touch-code = <INPUT_BTN_TOUCH>;
+-        threshold = <8>;
+-        axis-ratio = <2>;
+-        left-keycode = <C_AC_BACK>;
+-        right-keycode = <C_AC_FORWARD>;
+-    };
+ 
+     /*
+      * Three-finger gestures (macOS): tap = Launchpad, up/down = Mission Control, left/right =
+@@ -141,8 +158,7 @@
+         input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
+                                              INPUT_TRANSFORM_X_INVERT |
+                                              INPUT_TRANSFORM_Y_INVERT)>,
+-                           <&tps43_three_finger_swipe>, <&tps43_touch_swipe>,
+-                           <&tps43_touch_inertia>;
++                           <&tps43_three_finger_swipe>, <&tps43_touch_inertia>;
+ 
+         snipe_layer {
+             layers = <1>;
+diff --git a/docs/dual-tps43.md b/docs/dual-tps43.md
+index 8f09ba8..7da1368 100644
+--- a/docs/dual-tps43.md
++++ b/docs/dual-tps43.md
+@@ -9,24 +9,28 @@ NRST=左P0.16／右P1.00、I2Cアドレス=0x74。各MCUに独立したI2Cバス
+ ```text
+ 左TPS43 → 左input-splitの標準processors → BLE split (reg=0)
+         → 右input-split proxy (reg=0) → 左専用input-listener
+-        → 音量サークル検出 → X/Y 0化 → 共通HID
+-右TPS43 → 既存の右input-listener → 既存orientation/swipe/inertia/Snipe → 共通HID
++        → 音量サークル検出 → 二本指左右で戻る/進む → WHEEL・X/Y 0化 → 共通HID
++右TPS43 → 右input-listener → orientation → 三本指ジェスチャー → inertia/Snipe → 共通HID
+ ```
+ 
+ 左のprocessor順序は次の通り。変換はすべてBLE転送前に行う。
+ 
+ | 順序 | Processor | 結果 |
+ |---|---|---|
+-| 1 | `left_hwheel_blocker 0 1` | 元のREL_HWHEELを0化 |
+-| 2 | `left_wheel_to_hwheel` | REL_WHEELをREL_HWHEELへ変換、値と符号は保持 |
+-| 3 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
++| 1 | `left_middle_click_mapper` | BTN_1をBTN_2へ変換、DOWN/UPは保持 |
+ 
+-REL_X/Yは変換せずに転送する。右の左専用listenerで`left_circle_volume`が
+-一本指の回転を検出し（時計回り=音量アップ、45度ごとに1段）、続く
+-`zip_xy_scaler 0 1`でX/Yを0化するため、左パッドでカーソルは動かない。
++REL_X/Y、WHEEL、HWHEELは変換せずに転送する。右の左専用listenerは
++次の順で処理する。
++
++| 順序 | Processor | 結果 |
++|---|---|---|
++| 1 | `left_circle_volume` | 一本指の回転で音量（時計回り=アップ、45度ごと） |
++| 2 | `left_touch_swipe` | 二本指左右スワイプ1回で戻る/進む、HWHEELは常に破棄 |
++| 3 | `left_wheel_blocker 0 1` | 二本指上下（WHEEL）を0化 |
++| 4 | `zip_xy_scaler 0 1` | X/Yを0化、左パッドでカーソルは動かない |
++
++右パッドの二本指左右スワイプはtouch-swipeを通さず、そのまま横スクロールになる。
+ 
+-左TPS43の`invert-scroll-y`でWHEELの符号を反転してからHWHEELへ変換する。
+-上下スワイプによる水平スクロール方向は、初期のデュアルTPS43設定と逆になる。
+ 
+ BTN_0は変換しない。左はsingle-tapとpress-and-holdを有効にせず、
+ two-finger-tapとscrollのみ有効。一本指の動きは音量サークル専用。
+diff --git a/scripts/check_dual_tps43.py b/scripts/check_dual_tps43.py
+index 6a047e8..f0891d4 100644
+--- a/scripts/check_dual_tps43.py
++++ b/scripts/check_dual_tps43.py
+@@ -49,8 +49,8 @@ def main():
+     assert lc.get("CONFIG_ZMK_SPLIT_ROLE_CENTRAL") != "y"
+     assert rc.get("CONFIG_ZMK_SPLIT_ROLE_CENTRAL") == "y"
+     assert rc.get("CONFIG_ZMK_INPUT_LISTENER") == "y"
+-    for name in ("ZMK_INPUT_PROCESSOR_SCALER", "ZMK_INPUT_PROCESSOR_CODE_MAPPER"):
+-        assert lc.get("CONFIG_" + name) == "y", name
++    assert lc.get("CONFIG_ZMK_INPUT_PROCESSOR_CODE_MAPPER") == "y"
++    assert rc.get("CONFIG_ZMK_INPUT_PROCESSOR_SCALER") == "y"
+     for name in ("ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY",
+                  "ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING", "ZMK_STUDIO"):
+         assert rc.get("CONFIG_" + name) == "y", name
+@@ -111,12 +111,16 @@ def main():
+         return chain
+ 
+     left_chain = chain_of(left, ls)
+-    assert [n.name for n, _ in left_chain] == [
+-        "left_hwheel_blocker", "left_wheel_to_hwheel", "left_middle_click_mapper"]
+-    assert [params for _, params in left_chain] == [[0, 1], [], []]
++    assert [n.name for n, _ in left_chain] == ["left_middle_click_mapper"]
++    assert [params for _, params in left_chain] == [[]]
+     central_chain = chain_of(right, listener)
+-    assert [n.name for n, _ in central_chain] == ["left_circle_volume", "zip_xy_scaler"]
+-    assert [params for _, params in central_chain] == [[], [0, 1]]
++    assert [n.name for n, _ in central_chain] == [
++        "left_circle_volume", "left_touch_swipe", "left_wheel_blocker", "zip_xy_scaler"]
++    assert [params for _, params in central_chain] == [[], [], [0, 1], [0, 1]]
++    # Right pad: HWHEEL passes as horizontal scroll (no touch-swipe in its chain).
++    right_chain = [n.name for n, _ in chain_of(right, right.label2node["tps43_listener"])]
++    assert right_chain == ["tps43_orientation", "tps43_three_finger_swipe",
++                           "tps43_touch_inertia"], right_chain
+     circle = central_chain[0][0]
+     assert circle.props["x-code"].to_num() == c["INPUT_REL_X"]
+     assert circle.props["y-code"].to_num() == c["INPUT_REL_Y"]
+@@ -128,6 +132,10 @@ def main():
+             compatible = node.props["compatible"].to_string()
+             if compatible == "zmk,input-processor-circle-keys":
+                 continue  # Observes X/Y and touch only; never changes or stops events.
++            if compatible == "zmk,input-processor-touch-swipe":
++                if kind == rel and code == node.props["hwheel-code"].to_num():
++                    return None  # Always consumed; may tap Back/Forward instead.
++                continue
+             if kind != node.props["type"].to_num():
+                 continue
+             if compatible == "zmk,input-processor-scaler":
+@@ -145,10 +153,9 @@ def main():
+ 
+     rel, key = c["INPUT_EV_REL"], c["INPUT_EV_KEY"]
+     for value in (-32768, -100, -1, 0, 1, 100, 32767):
+-        for code in ("INPUT_REL_X", "INPUT_REL_Y", "INPUT_REL_HWHEEL"):
++        for code in ("INPUT_REL_X", "INPUT_REL_Y", "INPUT_REL_WHEEL"):
+             assert process(rel, c[code], value) == (rel, c[code], 0, True)
+-        assert process(rel, c["INPUT_REL_WHEEL"], value) == (
+-            rel, c["INPUT_REL_HWHEEL"], value, True)
++        assert process(rel, c["INPUT_REL_HWHEEL"], value) is None
+     for value in (0, 1):
+         assert process(key, c["INPUT_BTN_1"], value) == (key, c["INPUT_BTN_2"], value, True)
+         assert process(key, c["INPUT_BTN_0"], value) == (key, c["INPUT_BTN_0"], value, True)
+@@ -162,7 +169,7 @@ def main():
+                 value = int(value * params[0] / params[1])
+         assert value == 25, code
+     print("PASS: built pins, gestures, split routing, roles, battery/sleep/Studio config")
+-    print("PASS: processor order, signed motion blocking, wheel/button mapping, sync")
++    print("PASS: processor order, signed motion blocking, HWHEEL to Back/Forward, sync")
+     print("PASS: left X/Y reach the central volume circle and never move the cursor")
+     print("Hardware/BLE/Deep Sleep acceptance tests remain manual.")
+ 
+-- 
+2.43.0
+
+
+From c64ea580e65eb73ef2fccaa518f7e38bdb21129b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 09:54:41 +0900
+Subject: [PATCH 7/7] Sync keymap and keymap-drawer render from tps43 branch
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01V6WqEXBMkvfupWMkUKk7Pc
+---
+ config/nickey44a.keymap      | 16 ++++-----
+ keymap-drawer/nickey44a.svg  | 66 ++++++++++++------------------------
+ keymap-drawer/nickey44a.yaml | 14 ++++----
+ 3 files changed, 36 insertions(+), 60 deletions(-)
+
+diff --git a/config/nickey44a.keymap b/config/nickey44a.keymap
+index debc154..dd9ad60 100644
+--- a/config/nickey44a.keymap
++++ b/config/nickey44a.keymap
+@@ -42,17 +42,17 @@
+         };
+ 
+         c_d {
+-            bindings = <&kp LS(LA(F))>;
++            bindings = <&kp LA(F)>;
+             key-positions = <25 26>;
+         };
+ 
+         r_d {
+-            bindings = <&kp LS(LA(G))>;
++            bindings = <&kp LA(G)>;
+             key-positions = <26 27>;
+         };
+ 
+         f_d {
+-            bindings = <&kp LS(LA(ENTER))>;
++            bindings = <&kp LA(ENTER)>;
+             key-positions = <27 28>;
+         };
+ 
+@@ -62,7 +62,7 @@
+         };
+ 
+         r_d2 {
+-            bindings = <&kp LS(LA(T))>;
++            bindings = <&kp LA(T)>;
+             key-positions = <38 38 39>;
+         };
+ 
+@@ -111,10 +111,10 @@
+ 
+         default_layer {
+             bindings = <
+-&kp Q        &kp W  &kp E  &kp R  &kp T                    &trans                                                    &trans       &kp Y             &kp U  &kp I                &kp O                    &kp P
+-&kp A        &kp S  &kp D  &kp F  &kp G                    &trans                                                    &trans       &kp H             &kp J  &kp K                &kp L                    &mt EQUAL MINUS
+-&mt LSHFT Z  &kp Z  &kp C  &kp V  &kp B                    &trans       &trans           &trans                      &trans       &kp N             &kp M  &mt SEMICOLON COMMA  &mt SINGLE_QUOTE PERIOD  &mt RIGHT_SHIFT SLASH
+-                                  &mt LCTRL DOUBLE_QUOTES  &lt 2 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 1 ENTER  &mt RALT AT_SIGN
++&kp Q        &kp W  &kp E  &kp R  &kp T      &trans                                                    &trans       &kp Y          &kp U  &kp I                &kp O                    &kp P
++&kp A        &kp S  &kp D  &kp F  &kp G      &trans                                                    &trans       &kp H          &kp J  &kp K                &kp L                    &mt EQUAL MINUS
++&mt LSHFT Z  &kp X  &kp C  &kp V  &kp B      &trans       &trans           &trans                      &trans       &kp N          &kp M  &mt SEMICOLON COMMA  &mt SINGLE_QUOTE PERIOD  &mt RIGHT_SHIFT SLASH
++                                  &kp LCTRL  &lt 2 SPACE  &kp BACKSPACE    &mt RIGHT_COMMAND CAPSLOCK  &lt 1 ENTER  &kp RIGHT_ALT
+             >;
+         };
+ 
+diff --git a/keymap-drawer/nickey44a.svg b/keymap-drawer/nickey44a.svg
+index b1915e0..012ea06 100644
+--- a/keymap-drawer/nickey44a.svg
++++ b/keymap-drawer/nickey44a.svg
+@@ -231,7 +231,7 @@ path.combo {
+ </g>
+ <g transform="translate(84, 140)" class="key keypos-25">
+ <rect rx="6" ry="6" x="-26" y="-26" width="52" height="52" class="key"/>
+-<text x="0" y="0" class="key tap">Z</text>
++<text x="0" y="0" class="key tap">X</text>
+ </g>
+ <g transform="translate(140, 140)" class="key keypos-26">
+ <rect rx="6" ry="6" x="-26" y="-26" width="52" height="52" class="key"/>
+@@ -286,8 +286,7 @@ path.combo {
+ </g>
+ <g transform="translate(252, 196)" class="key keypos-38">
+ <rect rx="6" ry="6" x="-26" y="-26" width="52" height="52" class="key"/>
+-<text x="0" y="0" class="key tap">&quot;</text>
+-<text x="0" y="24" class="key hold">LCTRL</text>
++<text x="0" y="0" class="key tap">LCTRL</text>
+ </g>
+ <g transform="translate(308, 196)" class="key keypos-39">
+ <rect rx="6" ry="6" x="-26" y="-26" width="52" height="52" class="key"/>
+@@ -312,8 +311,9 @@ path.combo {
+ </a></g>
+ <g transform="translate(588, 196)" class="key keypos-43">
+ <rect rx="6" ry="6" x="-26" y="-26" width="52" height="52" class="key"/>
+-<text x="0" y="0" class="key tap">@</text>
+-<text x="0" y="24" class="key hold">RALT</text>
++<text x="0" y="0" class="key tap">
++<tspan x="0" dy="-0.6em">RIGHT</tspan><tspan x="0" dy="1.2em">ALT</tspan>
++</text>
+ </g>
+ <g class="combo combopos-0">
+ <rect rx="6" ry="6" x="42" y="15" width="28" height="26" class="combo"/>
+@@ -339,20 +339,16 @@ path.combo {
+ </g>
+ <g class="combo combopos-5">
+ <rect rx="6" ry="6" x="98" y="127" width="28" height="26" class="combo"/>
+-<text x="112" y="140" class="combo tap">
+-<tspan x="112" dy="-0.6em">Sft+Alt</tspan><tspan x="112" dy="1.2em">+F</tspan>
+-</text>
++<text x="112" y="140" class="combo tap">Alt+F</text>
+ </g>
+ <g class="combo combopos-6">
+ <rect rx="6" ry="6" x="154" y="127" width="28" height="26" class="combo"/>
+-<text x="168" y="140" class="combo tap">
+-<tspan x="168" dy="-0.6em">Sft+Alt</tspan><tspan x="168" dy="1.2em">+G</tspan>
+-</text>
++<text x="168" y="140" class="combo tap">Alt+G</text>
+ </g>
+ <g class="combo combopos-7">
+ <rect rx="6" ry="6" x="210" y="127" width="28" height="26" class="combo"/>
+ <text x="224" y="140" class="combo tap">
+-<tspan x="224" dy="-0.6em">Sft+Alt</tspan><tspan x="224" dy="1.2em">+ENTER</tspan>
++<tspan x="224" dy="-0.6em">Alt+</tspan><tspan x="224" dy="1.2em">ENTER</tspan>
+ </text>
+ </g>
+ <g class="combo combopos-8">
+@@ -363,9 +359,7 @@ path.combo {
+ </g>
+ <g class="combo combopos-9">
+ <rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
+-<text x="271" y="196" class="combo tap">
+-<tspan x="271" dy="-0.6em">Sft+Alt</tspan><tspan x="271" dy="1.2em">+T</tspan>
+-</text>
++<text x="271" y="196" class="combo tap">Alt+T</text>
+ </g>
+ <g class="combo combopos-10">
+ <path d="M308,196 l-37,0" class="combo"/>
+@@ -584,20 +578,16 @@ path.combo {
+ </g>
+ <g class="combo combopos-5">
+ <rect rx="6" ry="6" x="98" y="127" width="28" height="26" class="combo"/>
+-<text x="112" y="140" class="combo tap">
+-<tspan x="112" dy="-0.6em">Sft+Alt</tspan><tspan x="112" dy="1.2em">+F</tspan>
+-</text>
++<text x="112" y="140" class="combo tap">Alt+F</text>
+ </g>
+ <g class="combo combopos-6">
+ <rect rx="6" ry="6" x="154" y="127" width="28" height="26" class="combo"/>
+-<text x="168" y="140" class="combo tap">
+-<tspan x="168" dy="-0.6em">Sft+Alt</tspan><tspan x="168" dy="1.2em">+G</tspan>
+-</text>
++<text x="168" y="140" class="combo tap">Alt+G</text>
+ </g>
+ <g class="combo combopos-7">
+ <rect rx="6" ry="6" x="210" y="127" width="28" height="26" class="combo"/>
+ <text x="224" y="140" class="combo tap">
+-<tspan x="224" dy="-0.6em">Sft+Alt</tspan><tspan x="224" dy="1.2em">+ENTER</tspan>
++<tspan x="224" dy="-0.6em">Alt+</tspan><tspan x="224" dy="1.2em">ENTER</tspan>
+ </text>
+ </g>
+ <g class="combo combopos-8">
+@@ -608,9 +598,7 @@ path.combo {
+ </g>
+ <g class="combo combopos-9">
+ <rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
+-<text x="271" y="196" class="combo tap">
+-<tspan x="271" dy="-0.6em">Sft+Alt</tspan><tspan x="271" dy="1.2em">+T</tspan>
+-</text>
++<text x="271" y="196" class="combo tap">Alt+T</text>
+ </g>
+ <g class="combo combopos-10">
+ <path d="M308,196 l-37,0" class="combo"/>
+@@ -832,20 +820,16 @@ path.combo {
+ </g>
+ <g class="combo combopos-5">
+ <rect rx="6" ry="6" x="98" y="127" width="28" height="26" class="combo"/>
+-<text x="112" y="140" class="combo tap">
+-<tspan x="112" dy="-0.6em">Sft+Alt</tspan><tspan x="112" dy="1.2em">+F</tspan>
+-</text>
++<text x="112" y="140" class="combo tap">Alt+F</text>
+ </g>
+ <g class="combo combopos-6">
+ <rect rx="6" ry="6" x="154" y="127" width="28" height="26" class="combo"/>
+-<text x="168" y="140" class="combo tap">
+-<tspan x="168" dy="-0.6em">Sft+Alt</tspan><tspan x="168" dy="1.2em">+G</tspan>
+-</text>
++<text x="168" y="140" class="combo tap">Alt+G</text>
+ </g>
+ <g class="combo combopos-7">
+ <rect rx="6" ry="6" x="210" y="127" width="28" height="26" class="combo"/>
+ <text x="224" y="140" class="combo tap">
+-<tspan x="224" dy="-0.6em">Sft+Alt</tspan><tspan x="224" dy="1.2em">+ENTER</tspan>
++<tspan x="224" dy="-0.6em">Alt+</tspan><tspan x="224" dy="1.2em">ENTER</tspan>
+ </text>
+ </g>
+ <g class="combo combopos-8">
+@@ -856,9 +840,7 @@ path.combo {
+ </g>
+ <g class="combo combopos-9">
+ <rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
+-<text x="271" y="196" class="combo tap">
+-<tspan x="271" dy="-0.6em">Sft+Alt</tspan><tspan x="271" dy="1.2em">+T</tspan>
+-</text>
++<text x="271" y="196" class="combo tap">Alt+T</text>
+ </g>
+ <g class="combo combopos-10">
+ <path d="M308,196 l-37,0" class="combo"/>
+@@ -1085,20 +1067,16 @@ path.combo {
+ </g>
+ <g class="combo combopos-5">
+ <rect rx="6" ry="6" x="98" y="127" width="28" height="26" class="combo"/>
+-<text x="112" y="140" class="combo tap">
+-<tspan x="112" dy="-0.6em">Sft+Alt</tspan><tspan x="112" dy="1.2em">+F</tspan>
+-</text>
++<text x="112" y="140" class="combo tap">Alt+F</text>
+ </g>
+ <g class="combo combopos-6">
+ <rect rx="6" ry="6" x="154" y="127" width="28" height="26" class="combo"/>
+-<text x="168" y="140" class="combo tap">
+-<tspan x="168" dy="-0.6em">Sft+Alt</tspan><tspan x="168" dy="1.2em">+G</tspan>
+-</text>
++<text x="168" y="140" class="combo tap">Alt+G</text>
+ </g>
+ <g class="combo combopos-7">
+ <rect rx="6" ry="6" x="210" y="127" width="28" height="26" class="combo"/>
+ <text x="224" y="140" class="combo tap">
+-<tspan x="224" dy="-0.6em">Sft+Alt</tspan><tspan x="224" dy="1.2em">+ENTER</tspan>
++<tspan x="224" dy="-0.6em">Alt+</tspan><tspan x="224" dy="1.2em">ENTER</tspan>
+ </text>
+ </g>
+ <g class="combo combopos-8">
+@@ -1109,9 +1087,7 @@ path.combo {
+ </g>
+ <g class="combo combopos-9">
+ <rect rx="6" ry="6" x="257" y="183" width="28" height="26" class="combo"/>
+-<text x="271" y="196" class="combo tap">
+-<tspan x="271" dy="-0.6em">Sft+Alt</tspan><tspan x="271" dy="1.2em">+T</tspan>
+-</text>
++<text x="271" y="196" class="combo tap">Alt+T</text>
+ </g>
+ <g class="combo combopos-10">
+ <path d="M308,196 l-37,0" class="combo"/>
+diff --git a/keymap-drawer/nickey44a.yaml b/keymap-drawer/nickey44a.yaml
+index 6dfb9a6..a104121 100644
+--- a/keymap-drawer/nickey44a.yaml
++++ b/keymap-drawer/nickey44a.yaml
+@@ -26,7 +26,7 @@ layers:
+   - L
+   - {t: '-', h: '='}
+   - {t: Z, h: LSHFT}
+-  - Z
++  - X
+   - C
+   - V
+   - B
+@@ -39,12 +39,12 @@ layers:
+   - {t: ',', h: ;}
+   - {t: ., h: ''''}
+   - {t: /, h: RIGHT SHIFT}
+-  - {t: '"', h: LCTRL}
++  - LCTRL
+   - {t: SPACE, h: '2'}
+   - BACKSPACE
+   - {t: CAPSLOCK, h: RIGHT COMMAND}
+   - {t: ENTER, h: '1'}
+-  - {t: '@', h: RALT}
++  - RIGHT ALT
+   '1':
+   - '1'
+   - '2'
+@@ -192,14 +192,14 @@ combos:
+ - p: [24, 25]
+   k: Alt+Ctl+D
+ - p: [25, 26]
+-  k: Sft+Alt+F
++  k: Alt+F
+ - p: [26, 27]
+-  k: Sft+Alt+G
++  k: Alt+G
+ - p: [27, 28]
+-  k: Sft+Alt+ENTER
++  k: Alt+ENTER
+ - p: [37, 36]
+   k: Sft+Gui+4
+ - p: [38, 38, 39]
+-  k: Sft+Alt+T
++  k: Alt+T
+ - p: [38, 39, 40]
+   k: {t: '3', h: toggle}
+-- 
+2.43.0
+
