@@ -208,6 +208,8 @@ struct tps43_config {
     bool press_and_hold;
     /* Nickey44A: keep a press-and-hold drag down after lift until the next tap. */
     bool drag_lock;
+    /* Nickey44A: keymap layer held while dragging (-1 = disabled). */
+    int drag_layer;
     bool two_finger_tap;
     bool scroll;
     bool zoom;
@@ -284,6 +286,8 @@ struct tps43_drv_data {
     bool three_finger_session;
     /* Nickey44A: left button held by drag lock after the finger lifted. */
     bool drag_locked;
+    /* Nickey44A: drag-layer currently activated by this driver. */
+    bool drag_layer_on;
     int64_t last_three_finger_swipe_ms;
     /* Nickey44A soft pinch state (finger distance in permille of X resolution). */
     uint16_t pinch_resolution;
