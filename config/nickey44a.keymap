@@ -28,12 +28,12 @@
 
         left_p {
             bindings = <&kp LEFT_PARENTHESIS>;
-            key-positions = <14 15>;
+            key-positions = <14 13>;
         };
 
         right_p {
             bindings = <&kp RIGHT_PARENTHESIS>;
-            key-positions = <15 15 16>;
+            key-positions = <15 15 14>;
         };
 
         l_d {
@@ -63,7 +63,7 @@
 
         r_d2 {
             bindings = <&kp LA(LC(T))>;
-            key-positions = <16 17>;
+            key-positions = <16 15>;
         };
 
         system {
