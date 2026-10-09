@@ -185,9 +185,9 @@ combos:
   k: ESCAPE
 - p: [12, 13]
   k: TAB
-- p: [14, 15]
+- p: [14, 13]
   k: (
-- p: [15, 15, 16]
+- p: [15, 15, 14]
   k: )
 - p: [24, 25]
   k: Alt+Ctl+D
@@ -199,7 +199,7 @@ combos:
   k: Alt+Ctl+ENTER
 - p: [37, 36]
   k: Sft+Gui+4
-- p: [16, 17]
+- p: [16, 15]
   k: Alt+Ctl+T
 - p: [38, 39, 40]
   k: {t: '3', h: toggle}
