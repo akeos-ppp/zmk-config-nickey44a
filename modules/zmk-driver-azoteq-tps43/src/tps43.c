@@ -16,6 +16,13 @@
 
 #include "tps43.h"
 
+#define TPS43_HAS_KEYMAP (!IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
+#if TPS43_HAS_KEYMAP
+#include <zmk/keymap.h>
+#endif
+
+static void tps43_update_drag_layer(const struct device *dev, bool on);
+
 LOG_MODULE_REGISTER(tps43, CONFIG_INPUT_LOG_LEVEL);
 
 /**
@@ -634,10 +641,39 @@ static void tps43_work_handler(struct k_work *work) {
 done:
     // Save for next call
     drv_data->drag_active = is_drag_active;
+    tps43_update_drag_layer(dev, is_drag_active || drv_data->drag_locked);
     tps43_end_communication_window(dev);
 
     // Release semaphore after completing all I2C operations
     k_sem_give(&drv_data->lock);
+}
+
+/**
+ * @brief Nickey44A: hold the configured drag-layer while a drag is active
+ *
+ * The RGB LED widget shows the highest active layer color, so a transparent
+ * layer with its own color makes the LED indicate the drag state.
+ */
+static void tps43_update_drag_layer(const struct device *dev, bool on) {
+#if TPS43_HAS_KEYMAP
+    const struct tps43_config *config = dev->config;
+    struct tps43_drv_data *drv_data = dev->data;
+
+    if (config->drag_layer < 0 || drv_data->drag_layer_on == on) {
+        return;
+    }
+    drv_data->drag_layer_on = on;
+    if (on) {
+        LOG_INF("Drag layer %d ON", config->drag_layer);
+        zmk_keymap_layer_activate(config->drag_layer);
+    } else {
+        LOG_INF("Drag layer %d OFF", config->drag_layer);
+        zmk_keymap_layer_deactivate(config->drag_layer);
+    }
+#else
+    ARG_UNUSED(dev);
+    ARG_UNUSED(on);
+#endif
 }
 
 /**
@@ -655,6 +691,8 @@ static int tps43_reset_values(const struct device *dev) {
     drv_data->device_ready = false;
     drv_data->initialized = false;
     drv_data->drag_active = false;
+    /* A locked drag keeps the button (and its layer) until the next tap. */
+    tps43_update_drag_layer(dev, drv_data->drag_locked);
 
     LOG_INF("Values reset");
     return 0;
@@ -1558,6 +1596,7 @@ static int tps43_init(const struct device *dev) {
         .single_tap = DT_INST_PROP(inst, single_tap),                                                \
         .press_and_hold = DT_INST_PROP(inst, press_and_hold),                                        \
         .drag_lock = DT_INST_PROP(inst, drag_lock),                                        \
+        .drag_layer = DT_INST_PROP_OR(inst, drag_layer, -1),                                         \
         .two_finger_tap = DT_INST_PROP(inst, two_finger_tap),                                        \
         .scroll = DT_INST_PROP(inst, scroll),                                                        \
         .zoom = DT_INST_PROP(inst, zoom),                                                            \
