@@ -183,6 +183,15 @@ properties:
       pressed when the finger lifts; the next single tap releases it without
       clicking, and another press-and-hold continues the same drag.
 
+  drag-layer:
+    type: int
+    required: false
+    description: >
+      Nickey44A local option. Keymap layer index activated while a
+      press-and-hold drag is active (including drag lock) and deactivated when
+      it ends. A transparent layer with its own RGB LED widget color makes the
+      LED show the drag state. Only used on the split central.
+
   invert-x:
     type: boolean
     description: If present, invert X coordinate values.
