@@ -215,6 +215,8 @@
          */
         press-and-hold;
         drag-lock;
+        /* Layer 4 (transparent) is held while dragging; its LED color shows the drag. */
+        drag-layer = <4>;
         two-finger-tap;
         scroll;
         /*
