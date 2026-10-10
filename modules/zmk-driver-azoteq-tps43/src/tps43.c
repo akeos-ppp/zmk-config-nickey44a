@@ -526,9 +526,13 @@ static void tps43_work_handler(struct k_work *work) {
             }
             pinch_consumes = true;
         }
-    } else if (num_fingers != 2) {
+    }
+    if (num_fingers != 2) {
         drv_data->pinch_tracking = false;
         drv_data->pinch_active = false;
+        /* Nickey44A: drop the scroll remainder so it never leaks into the next touch. */
+        drv_data->scroll_acc_x = 0;
+        drv_data->scroll_acc_y = 0;
     }
 
     if (gestures_events[0] != 0 || gestures_events[1] != 0) {
@@ -602,17 +606,29 @@ static void tps43_work_handler(struct k_work *work) {
                 if (config->invert_scroll_x) {
                     rel_x = -rel_x;
                 }
-                int16_t wheel = (rel_x * config->scroll_sensitivity) / 100;
-                LOG_INF("Scrolling %d horizontally", wheel);
-                input_report_rel(dev, INPUT_REL_HWHEEL, wheel, true, K_FOREVER);
+                /*
+                 * Nickey44A: accumulate so slow motion is not truncated to 0
+                 * (at sensitivity 5, every sample under 20 counts was lost).
+                 */
+                drv_data->scroll_acc_x += (int32_t)rel_x * config->scroll_sensitivity;
+                int16_t wheel = (int16_t)(drv_data->scroll_acc_x / 100);
+                drv_data->scroll_acc_x -= (int32_t)wheel * 100;
+                if (wheel != 0) {
+                    LOG_INF("Scrolling %d horizontally", wheel);
+                    input_report_rel(dev, INPUT_REL_HWHEEL, wheel, true, K_FOREVER);
+                }
             } else {
                 // Vertical scroll
                 if (config->invert_scroll_y) {
                     rel_y = -rel_y;
                 }
-                int16_t wheel = (rel_y * config->scroll_sensitivity) / 100;
-                LOG_INF("Scrolling %d vertically", wheel);
-                input_report_rel(dev, INPUT_REL_WHEEL, wheel, true, K_FOREVER);
+                drv_data->scroll_acc_y += (int32_t)rel_y * config->scroll_sensitivity;
+                int16_t wheel = (int16_t)(drv_data->scroll_acc_y / 100);
+                drv_data->scroll_acc_y -= (int32_t)wheel * 100;
+                if (wheel != 0) {
+                    LOG_INF("Scrolling %d vertically", wheel);
+                    input_report_rel(dev, INPUT_REL_WHEEL, wheel, true, K_FOREVER);
+                }
             }
             is_scroll_active = false;
         } else if (is_zoom_active) {
