@@ -295,6 +295,9 @@ struct tps43_drv_data {
     bool pinch_active;
     int32_t pinch_base;
     int32_t pinch_last;
+    /* Nickey44A: scroll remainder (counts x scroll-sensitivity) carried between samples. */
+    int32_t scroll_acc_x;
+    int32_t scroll_acc_y;
 };
 
 /*
