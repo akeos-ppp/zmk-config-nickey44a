@@ -224,9 +224,11 @@
          * itself (the controller's zoom gesture did not work on this pad)
          * and reports its change as REL_MISC for tps43_pinch_zoom.
          * Raise soft-pinch-start-permille if scrolling turns into zoom.
+         * 80 (~8% of pad width) let finger-spacing drift during a long
+         * two-finger swipe start a pinch; 150 needs a deliberate spread.
          */
         soft-pinch;
-        soft-pinch-start-permille = <80>;
+        soft-pinch-start-permille = <150>;
         /* One driver event per three-finger sample; the processor fires once per touch. */
         three-finger-swipe;
         three-finger-swipe-throttle-ms = <0>;
