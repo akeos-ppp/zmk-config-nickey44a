@@ -6,6 +6,8 @@ manifest:
       url-base: https://github.com/cormoran
     - name: caksoylar  # <-- RGB LED
       url-base: https://github.com/caksoylar
+    - name: prospector  # <-- Prospector Scanner status advertisement
+      url-base: https://github.com/t-ogura
   projects:
     - name: zmk
       remote: cormoran
@@ -14,5 +16,9 @@ manifest:
     - name: zmk-rgbled-widget
       remote: caksoylar
       revision: 8756cb7b8114069fa3c25c6f6c990f24988fceff # v0.3
+    - name: prospector-zmk-module
+      remote: prospector
+      revision: v2.2.3
+      path: modules/prospector-zmk-module
   self:
     path: config
