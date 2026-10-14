@@ -34,8 +34,10 @@ REL_X/Y、WHEEL、HWHEELは変換せずに転送する。右の左専用listener
 ドライバーの`soft-pinch`で二本指の座標から指間距離を計算する。距離がパッド幅の
 8%（soft-pinch-start-permille=80）以上変わるとピンチ開始とし、指を離すまで
 距離変化をREL_MISC（パッド幅の千分率）で送り、スクロールは止める。
-`tps43_pinch_zoom`がstep（100）ごとにCmd+=（指を広げる）/Cmd+-（指を狭める）へ
-変換し、REL_MISCは破棄する。
+`tps43_pinch_zoom`はピンチ中だけOption（LALT）を押し、step（30）ごとに縦ホイールを
+1ティック送る（指を広げる＝上、狭める＝下）。Premiere Proなどのoption+スクロールの
+ズームになる。ホイールはHIDへ直接送るのでtouch-inertiaの慣性は付かない。
+向きが逆ならinvert-wheelを追加する。REL_MISCは破棄する。
 
 左パッドのscroll-sensitivityは100（生カウント）。5だと1サンプル20カウント未満の
 ゆっくりした二本指移動が0に切り捨てられ、上下スワイプが発火しなかった。
