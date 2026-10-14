@@ -1,4 +1,4 @@
-description: Turns TPS43 pinch (zoom gesture) motion into repeated zoom-in/zoom-out key taps
+description: Turns TPS43 pinch (zoom gesture) motion into modifier + vertical wheel (Option+scroll zoom)
 compatible: "zmk,input-processor-pinch-keys"
 include: ip_zero_param.yaml
 properties:
@@ -6,19 +6,14 @@ properties:
     type: int
     required: true
     description: Relative code carrying the driver's signed zoom amount (INPUT_REL_MISC).
-  touch-code:
-    type: int
-    required: true
-    description: Key code reported on touch down/up; release clears the accumulator.
   step:
     type: int
-    default: 60
-    description: Positive zoom units per key tap. Larger means fewer zoom steps per pinch.
-  zoom-in-keycode:
+    default: 30
+    description: Zoom units (permille of pad width) per wheel tick. Larger means slower zoom.
+  modifier-keycode:
     type: int
     required: true
-    description: Encoded ZMK keycode tapped per step of positive zoom (fingers apart).
-  zoom-out-keycode:
-    type: int
-    required: true
-    description: Encoded ZMK keycode tapped per step of negative zoom (fingers together).
+    description: Encoded ZMK keycode held while pinching (LALT for macOS Option).
+  invert-wheel:
+    type: boolean
+    description: Send wheel down for fingers apart instead of wheel up.
