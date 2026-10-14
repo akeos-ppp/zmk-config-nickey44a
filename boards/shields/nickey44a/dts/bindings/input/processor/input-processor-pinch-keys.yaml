@@ -1,4 +1,4 @@
-description: Turns TPS43 pinch (zoom gesture) motion into modifier + vertical wheel (Option+scroll zoom)
+description: Turns TPS43 pinch (zoom gesture) motion into held modifier/mouse button + vertical wheel
 compatible: "zmk,input-processor-pinch-keys"
 include: ip_zero_param.yaml
 properties:
@@ -12,8 +12,10 @@ properties:
     description: Zoom units (permille of pad width) per wheel tick. Larger means slower zoom.
   modifier-keycode:
     type: int
-    required: true
-    description: Encoded ZMK keycode held while pinching (LALT for macOS Option).
+    description: Encoded ZMK keycode held while pinching (e.g. LALT). Optional.
+  hold-buttons:
+    type: int
+    description: Mouse button flags held while pinching (e.g. MB5, as LalaPad Gen2). Optional.
   invert-wheel:
     type: boolean
     description: Send wheel down for fingers apart instead of wheel up.
