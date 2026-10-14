@@ -145,20 +145,18 @@
     };
 
     /*
-     * Right pad: two-finger pinch zooms (fingers apart = Cmd+=, together =
-     * Cmd+-), one tap per `step` zoom units, repeating while pinching. If the
-     * direction is reversed on hardware, swap the two keycodes; raise `step`
-     * for fewer zoom steps per pinch.
+     * Right pad: two-finger pinch = Option + vertical wheel (fingers apart =
+     * wheel up), the Option+scroll zoom of Premiere Pro and similar apps.
+     * Option is held only while the pinch lasts. If the zoom direction is
+     * reversed, add invert-wheel; raise `step` for slower zoom.
      */
     tps43_pinch_zoom: tps43_pinch_zoom {
         compatible = "zmk,input-processor-pinch-keys";
         #input-processor-cells = <0>;
         zoom-code = <INPUT_REL_MISC>;
-        touch-code = <INPUT_BTN_TOUCH>;
-        /* Permille of pad width per zoom tap. */
-        step = <100>;
-        zoom-in-keycode = <LG(EQUAL)>;
-        zoom-out-keycode = <LG(MINUS)>;
+        /* Permille of pad width per wheel tick. */
+        step = <30>;
+        modifier-keycode = <LALT>;
     };
 
     tps43_touch_inertia: tps43_touch_inertia {
