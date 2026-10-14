@@ -31,11 +31,6 @@
             key-positions = <14 13>;
         };
 
-        right_p {
-            bindings = <&kp RIGHT_PARENTHESIS>;
-            key-positions = <15 15 14>;
-        };
-
         l_d {
             bindings = <&kp LA(LC(D))>;
             key-positions = <24 25>;
@@ -69,6 +64,11 @@
         system {
             bindings = <&to 3>;
             key-positions = <38 39 40>;
+        };
+
+        right_p {
+            bindings = <&kp RIGHT_PARENTHESIS>;
+            key-positions = <14 15>;
         };
     };
 
