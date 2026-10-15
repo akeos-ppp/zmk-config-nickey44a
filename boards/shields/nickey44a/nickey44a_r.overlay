@@ -1,4 +1,6 @@
 #include "nickey44a.dtsi"
+#include <behaviors.dtsi>
+#include <scroll-snap.dtsi>
 #include <input/processors.dtsi>
 #include <dt-bindings/pinctrl/nrf-pinctrl.h>
 #include <dt-bindings/zmk/input_transform.h>
@@ -7,11 +9,13 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 /*
+ * Right pad: LalaPad Gen2 trackpad (Azoteq IQS9151, I2C 0x56) on the former
  * TPS43 FPC breakout wiring:
- *   SDA = XIAO NFC1/P0.09
- *   SCL = XIAO NFC2/P0.10
- *   RDY = XIAO P1.10
- *   NRST = XIAO P1.00
+ *   SDA  = XIAO NFC1/P0.09
+ *   SCL  = XIAO NFC2/P0.10
+ *   RDY  = XIAO P1.10 (IQS9151 RDY, active low)
+ *   NRST = XIAO P1.00 (held high; leave unconnected if the module has none)
+ * The left pad stays TPS43.
  */
 
 &uicr {
@@ -106,88 +110,42 @@
                            <&left_wheel_blocker 0 1>, <&zip_xy_scaler 0 1>;
     };
 
-    tps43_orientation: tps43_orientation {
-        compatible = "zmk,input-processor-transform";
-        #input-processor-cells = <1>;
-        type = <INPUT_EV_REL>;
-        x-codes = <INPUT_REL_X INPUT_REL_HWHEEL>;
-        y-codes = <INPUT_REL_Y INPUT_REL_WHEEL>;
-    };
-
-
     /*
-     * Three-finger gestures (macOS): tap = Launchpad, up/down = Mission Control, left/right =
-     * adjacent Space, following the trackpad convention (fingers left -> the
-     * Space to the right). The driver reports controller coordinates; with
-     * the measured orientation above, controller SOUTH = physical left,
-     * NORTH = right, EAST = up, WEST = down.
+     * Right pad: LalaPad Gen2 IQS9151 (same gesture mapping as LalaPad Gen2's
+     * Mac layer, right side). The driver reports gestures as INPUT_BTN_x key
+     * events; they are bound directly to behaviors here instead of
+     * LalaPad's virtual key positions (&tp_to_pos).
+     *   BTN_0 1F tap / hold       -> left click (drag)
+     *   BTN_1 2F tap              -> right click
+     *   BTN_2 3F tap              -> Launchpad (LG(L), same as &launch)
+     *   BTN_3 / BTN_4 3F swipe L/R -> mouse back / forward (MB4 / MB5)
+     *   BTN_5 / BTN_6 3F swipe U/D -> Mission Control (LC(UP), same as &mission)
+     *   BTN_7 2F pinch            -> MB5 held + wheel
      */
-    tps43_three_finger_swipe: tps43_three_finger_swipe {
-        compatible = "zmk,input-processor-three-finger-swipe";
+    iqs9151_key_behaviors: iqs9151_key_behaviors {
+        compatible = "zmk,input-processor-behaviors-consume";
         #input-processor-cells = <0>;
-        touch-code = <INPUT_BTN_TOUCH>;
-        left-code = <INPUT_BTN_SOUTH>;
-        right-code = <INPUT_BTN_NORTH>;
-        up-code = <INPUT_BTN_EAST>;
-        down-code = <INPUT_BTN_WEST>;
-        threshold = <3>;
-        axis-ratio = <2>;
-        left-keycode = <LC(RIGHT)>;
-        right-keycode = <LC(LEFT)>;
-        up-keycode = <LC(UP)>;
-        down-keycode = <LC(UP)>;
-        /* Driver-local three-finger contact code (TPS43_BTN_THREE_FINGERS). */
-        three-finger-code = <0x14e>;
-        /* Three-finger tap = Launchpad; same shortcut as the keymap's LAUNCH macro. */
-        tap-keycode = <LG(L)>;
-        tap-max-ms = <300>;
-        tap-max-samples = <2>;
-        click-suppress-ms = <150>;
+        type = <INPUT_EV_KEY>;
+        codes = <INPUT_BTN_0 INPUT_BTN_1 INPUT_BTN_2 INPUT_BTN_3
+                 INPUT_BTN_4 INPUT_BTN_5 INPUT_BTN_6 INPUT_BTN_7>;
+        bindings = <&mkp LCLK>, <&mkp RCLK>, <&kp LG(L)>, <&mkp MB4>,
+                   <&mkp MB5>, <&kp LC(UP_ARROW)>, <&kp LC(UP_ARROW)>, <&mkp MB5>;
     };
 
-    /*
-     * Right pad: two-finger pinch = mouse button 5 held + vertical wheel
-     * (fingers apart = wheel up), the same output as LalaPad Gen2's Mac layer.
-     * MB5 is held only while the pinch lasts. For Option+scroll instead, use
-     * modifier-keycode = <LALT> and drop hold-buttons. If the zoom direction
-     * is reversed, add invert-wheel; raise `step` for slower zoom.
-     */
-    tps43_pinch_zoom: tps43_pinch_zoom {
-        compatible = "zmk,input-processor-pinch-keys";
-        #input-processor-cells = <0>;
-        zoom-code = <INPUT_REL_MISC>;
-        /* Permille of pad width per wheel tick. */
-        step = <30>;
-        hold-buttons = <MB5>;
-    };
-
-    tps43_touch_inertia: tps43_touch_inertia {
-        compatible = "zmk,input-processor-touch-inertia";
-        #input-processor-cells = <0>;
-        wheel-code = <INPUT_REL_WHEEL>;
-        touch-code = <INPUT_BTN_TOUCH>;
-        tick-ms = <10>;
-        decay-permille = <920>;
-        stop-threshold-q8 = <96>;
-        launch-threshold-q8 = <384>;
-        ema-new-permille = <250>;
-        cancel-scroll-inertia-on-ctrl;
-    };
-
-    tps43_listener: tps43_listener {
+    iqs9151_listener: iqs9151_listener {
         compatible = "zmk,input-listener";
-        device = <&tps43>;
-        /* Correct the measured controller output: left -> down, down -> left. */
-        input-processors = <&tps43_orientation (INPUT_TRANSFORM_XY_SWAP |
-                                             INPUT_TRANSFORM_X_INVERT |
-                                             INPUT_TRANSFORM_Y_INVERT)>,
-                           <&tps43_three_finger_swipe>, <&tps43_pinch_zoom>,
-                           <&tps43_touch_inertia>;
+        device = <&iqs9151>;
+        input-processors = <&iqs9151_key_behaviors>,
+                           <&zip_xy_scaler 1 5>,
+                           <&zip_scroll_scaler 1 12>,
+                           <&zip_scroll_snap>;
 
         snipe_layer {
             layers = <1>;
-            process-next;
-            input-processors = <&zip_xy_scaler 2 3>;
+            input-processors = <&iqs9151_key_behaviors>,
+                               <&zip_xy_scaler 1 15>,
+                               <&zip_scroll_scaler 1 40>,
+                               <&zip_scroll_snap>;
         };
     };
 };
@@ -202,46 +160,24 @@
     #address-cells = <1>;
     #size-cells = <0>;
 
-    tps43: tps43@74 {
-        compatible = "azoteq,tps43";
-        reg = <0x74>;
-        rst-gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
-        rdy-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+    iqs9151: iqs9151@56 {
+        compatible = "azoteq,iqs9151";
+        reg = <0x56>;
+        status = "okay";
+        /* IQS9151 RDY on the former TPS43 RDY line (P1.10). */
+        irq-gpios = <&gpio1 10 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};
 
-        single-tap;
-        /*
-         * Touch and stay still for hold-time to press the left button and drag.
-         * drag-lock keeps it pressed after lift; the next single tap releases.
-         */
-        press-and-hold;
-        drag-lock;
-        /* Layer 4 (transparent) is held while dragging; its LED color shows the drag. */
-        drag-layer = <4>;
-        two-finger-tap;
-        scroll;
-        /*
-         * Pinch: the driver measures the distance between the two fingers
-         * itself (the controller's zoom gesture did not work on this pad)
-         * and reports its change as REL_MISC for tps43_pinch_zoom.
-         * Raise soft-pinch-start-permille if scrolling turns into zoom.
-         */
-        soft-pinch;
-        soft-pinch-start-permille = <80>;
-        /* One driver event per three-finger sample; the processor fires once per touch. */
-        three-finger-swipe;
-        three-finger-swipe-throttle-ms = <0>;
-        /* The listener swaps axes, so driver X controls host vertical scrolling. */
-        invert-scroll-y;
-
-        filter-settings = <0x0B>;
-        filter-dynamic-bottom = <5>;
-        sensitivity = <100>;
-        scroll-sensitivity = <5>;
-        hold-time = <250>;
-        enable-power-management;
-        /* Controller settings used when the listener's correction was measured. */
-        switch-xy;
-        invert-x;
+/*
+ * The former TPS43 NRST line (P1.00) is driven high so an IQS9151 module
+ * with NRST wired to it is never held in reset.
+ */
+&gpio1 {
+    iqs9151_nrst_hog {
+        gpio-hog;
+        gpios = <0 GPIO_ACTIVE_HIGH>;
+        output-high;
     };
 };
 
