@@ -15,7 +15,7 @@
  *   SCL  = XIAO NFC2/P0.10
  *   RDY  = XIAO P1.10 (IQS9151 RDY, active low)
  *   NRST = XIAO P1.00 (held high; leave unconnected if the module has none)
- * The left pad stays TPS43.
+ * The left pad is also an IQS9151 (see nickey44a_l.overlay).
  */
 
 &uicr {
@@ -23,14 +23,14 @@
 };
 
 &pinctrl {
-    nickey44a_tps43_i2c0_default: nickey44a_tps43_i2c0_default {
+    nickey44a_iqs9151_i2c0_default: nickey44a_iqs9151_i2c0_default {
         group1 {
             psels = <NRF_PSEL(TWIM_SDA, 0, 9)>,
                     <NRF_PSEL(TWIM_SCL, 0, 10)>;
         };
     };
 
-    nickey44a_tps43_i2c0_sleep: nickey44a_tps43_i2c0_sleep {
+    nickey44a_iqs9151_i2c0_sleep: nickey44a_iqs9151_i2c0_sleep {
         group1 {
             psels = <NRF_PSEL(TWIM_SDA, 0, 9)>,
                     <NRF_PSEL(TWIM_SCL, 0, 10)>;
@@ -44,7 +44,7 @@
         #address-cells = <1>;
         #size-cells = <0>;
 
-        left_tps43_split: left_tps43_split@0 {
+        left_pad_split: left_pad_split@0 {
             compatible = "zmk,input-split";
             reg = <0>;
         };
@@ -60,8 +60,10 @@
         #input-processor-cells = <0>;
         x-code = <INPUT_REL_X>;
         y-code = <INPUT_REL_Y>;
+        /* IQS9151 has no TOUCH event; idle-reset-ms delimits strokes. */
         touch-code = <INPUT_BTN_TOUCH>;
-        segment-distance = <12>;
+        /* Tuned for IQS9151 raw counts; raise if jitter fires steps. */
+        segment-distance = <40>;
         step-degrees = <45>;
         max-turn-degrees = <90>;
         idle-reset-ms = <200>;
@@ -70,20 +72,22 @@
     };
 
     /*
-     * Left pad: one Back/Forward per two-finger left/right swipe, and one
-     * browser tab switch per two-finger up/down swipe (Ctrl+Tab = next tab,
-     * Ctrl+Shift+Tab = previous tab). If a direction is reversed on hardware,
-     * swap that pair of keycodes.
+     * Left pad (IQS9151): one browser tab switch per two-finger up/down
+     * swipe (Ctrl+Tab = next tab, Ctrl+Shift+Tab = previous tab). The
+     * IQS9151 has no TOUCH event, so a WHEEL gap of idle-reset-ms starts a
+     * new swipe. Horizontal Back/Forward comes from the driver's one-shot
+     * 2F swipe (BTN_8/BTN_9) instead, since SCROLL_X is off on the left.
+     * If the vertical direction is reversed on hardware, swap the keycodes.
      */
     left_touch_swipe: left_touch_swipe {
         compatible = "zmk,input-processor-touch-swipe";
         #input-processor-cells = <0>;
         hwheel-code = <INPUT_REL_HWHEEL>;
         wheel-code = <INPUT_REL_WHEEL>;
-        touch-code = <INPUT_BTN_TOUCH>;
-        /* Raw controller counts (left scroll-sensitivity = 100). */
-        threshold = <160>;
-        vertical-threshold = <120>;
+        idle-reset-ms = <150>;
+        /* Raw IQS9151 centroid counts after the 50-count scroll start. */
+        threshold = <150>;
+        vertical-threshold = <150>;
         axis-ratio = <2>;
         left-keycode = <C_AC_BACK>;
         right-keycode = <C_AC_FORWARD>;
@@ -99,15 +103,36 @@
         codes = <INPUT_REL_WHEEL>;
     };
 
-    left_tps43_listener: left_tps43_listener {
+    /*
+     * Left pad gesture keys from the IQS9151 driver:
+     *   BTN_0 1F tap         -> left click
+     *   BTN_1 2F tap         -> middle click
+     *   BTN_8 / BTN_9 2F swipe right / left -> Forward / Back
+     *   BTN_2..BTN_7 (3F, pinch) are disabled in nickey44a_l.conf and
+     *   swallowed here so they never click.
+     * If Back/Forward is reversed on hardware, swap the BTN_8/BTN_9 bindings.
+     */
+    left_iqs9151_key_behaviors: left_iqs9151_key_behaviors {
+        compatible = "zmk,input-processor-behaviors-consume";
+        #input-processor-cells = <0>;
+        type = <INPUT_EV_KEY>;
+        codes = <INPUT_BTN_0 INPUT_BTN_1 INPUT_BTN_2 INPUT_BTN_3 INPUT_BTN_4
+                 INPUT_BTN_5 INPUT_BTN_6 INPUT_BTN_7 INPUT_BTN_8 INPUT_BTN_9>;
+        bindings = <&mkp LCLK>, <&mkp MCLK>, <&none>, <&none>, <&none>,
+                   <&none>, <&none>, <&none>, <&kp C_AC_FORWARD>, <&kp C_AC_BACK>;
+    };
+
+    left_pad_listener: left_pad_listener {
         compatible = "zmk,input-listener";
-        device = <&left_tps43_split>;
+        device = <&left_pad_split>;
         /*
-         * Observe the circle, turn HWHEEL into Back/Forward (touch-swipe always
-         * consumes HWHEEL) and WHEEL into tab switching, then zero WHEEL and X/Y.
+         * Map gesture keys, observe the circle (volume), turn WHEEL into tab
+         * switching, then zero WHEEL and X/Y: the left pad never moves the
+         * cursor or scrolls.
          */
-        input-processors = <&left_circle_volume>, <&left_touch_swipe>,
-                           <&left_wheel_blocker 0 1>, <&zip_xy_scaler 0 1>;
+        input-processors = <&left_iqs9151_key_behaviors>, <&left_circle_volume>,
+                           <&left_touch_swipe>, <&left_wheel_blocker 0 1>,
+                           <&zip_xy_scaler 0 1>;
     };
 
     /*
@@ -153,8 +178,8 @@
 &i2c0 {
     status = "okay";
     compatible = "nordic,nrf-twim";
-    pinctrl-0 = <&nickey44a_tps43_i2c0_default>;
-    pinctrl-1 = <&nickey44a_tps43_i2c0_sleep>;
+    pinctrl-0 = <&nickey44a_iqs9151_i2c0_default>;
+    pinctrl-1 = <&nickey44a_iqs9151_i2c0_sleep>;
     pinctrl-names = "default", "sleep";
     clock-frequency = <I2C_BITRATE_STANDARD>;
     #address-cells = <1>;
