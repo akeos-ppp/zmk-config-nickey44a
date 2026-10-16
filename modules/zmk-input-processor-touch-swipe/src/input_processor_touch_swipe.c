@@ -29,6 +29,12 @@ struct touch_swipe_config {
     uint32_t up_keycode;
     uint32_t down_keycode;
     int32_t vertical_threshold;
+    /*
+     * 0: a touch is delimited by touch-code press/release.
+     * >0: for sensors without a TOUCH event (IQS9151), a wheel gap longer
+     * than this starts a new touch.
+     */
+    int32_t idle_reset_ms;
 };
 
 struct touch_swipe_data {
@@ -40,6 +46,7 @@ struct touch_swipe_data {
     int32_t vertical_travel;
     /* Total horizontal travel guards vertical gestures the same way. */
     int32_t horizontal_travel;
+    int64_t last_wheel_ms;
 };
 
 static int64_t magnitude(int32_t value) {
@@ -118,6 +125,16 @@ static int observe_input(const struct device *dev, struct input_event *event,
     if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
     }
+    if (cfg->idle_reset_ms > 0 &&
+        (event->code == cfg->wheel_code || event->code == cfg->hwheel_code)) {
+        int64_t now = k_uptime_get();
+        if (!data->touching || now - data->last_wheel_ms > cfg->idle_reset_ms) {
+            reset(data);
+            data->touching = true;
+            LOG_DBG("touch swipe start (idle reset)");
+        }
+        data->last_wheel_ms = now;
+    }
     if (event->code == cfg->wheel_code) {
         if (data->touching && !data->swipe_fired) {
             data->vertical_accum = bounded_add(data->vertical_accum, event->value);
@@ -164,6 +181,8 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
                  "horizontal and vertical codes must differ");                                   \
     BUILD_ASSERT(DT_INST_PROP_OR(n, vertical_threshold, DT_INST_PROP(n, threshold)) > 0,          \
                  "vertical-threshold must be positive");                                         \
+    BUILD_ASSERT(DT_INST_NODE_HAS_PROP(n, touch_code) || DT_INST_PROP(n, idle_reset_ms) > 0,      \
+                 "set touch-code or a positive idle-reset-ms");                                  \
     BUILD_ASSERT((DT_INST_PROP_OR(n, up_keycode, 0) == 0) ==                                       \
                      (DT_INST_PROP_OR(n, down_keycode, 0) == 0),                                 \
                  "set both up-keycode and down-keycode, or neither");                            \
@@ -171,7 +190,7 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
     static const struct touch_swipe_config config_##n = {                                          \
         .hwheel_code = DT_INST_PROP(n, hwheel_code),                                               \
         .wheel_code = DT_INST_PROP(n, wheel_code),                                                 \
-        .touch_code = DT_INST_PROP(n, touch_code),                                                 \
+        .touch_code = DT_INST_PROP_OR(n, touch_code, 0xFFFF),                                                 \
         .threshold = DT_INST_PROP(n, threshold),                                                   \
         .axis_ratio = DT_INST_PROP(n, axis_ratio),                                                 \
         .left_keycode = DT_INST_PROP(n, left_keycode),                                             \
@@ -180,6 +199,7 @@ static const struct zmk_input_processor_driver_api api = {.handle_event = observ
         .down_keycode = DT_INST_PROP_OR(n, down_keycode, 0),                                       \
         .vertical_threshold =                                                                      \
             DT_INST_PROP_OR(n, vertical_threshold, DT_INST_PROP(n, threshold)),                    \
+        .idle_reset_ms = DT_INST_PROP(n, idle_reset_ms),                                           \
     };                                                                                            \
     DEVICE_DT_INST_DEFINE(n, NULL, NULL, &data_##n, &config_##n, POST_KERNEL,                       \
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api);
