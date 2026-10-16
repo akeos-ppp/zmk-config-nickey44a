@@ -11,7 +11,11 @@ properties:
     required: true
   touch-code:
     type: int
-    required: true
+    description: TOUCH key code delimiting a touch. Omit for sensors without one and set idle-reset-ms.
+  idle-reset-ms:
+    type: int
+    default: 0
+    description: When positive, a WHEEL/HWHEEL gap longer than this starts a new touch (for sensors without a TOUCH event).
   threshold:
     type: int
     default: 8
