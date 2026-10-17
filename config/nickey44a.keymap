@@ -70,6 +70,11 @@
             bindings = <&kp RIGHT_PARENTHESIS>;
             key-positions = <15 16>;
         };
+
+        reset {
+            bindings = <&sys_reset>;
+            key-positions = <38 39 40 41 43 42>;
+        };
     };
 
     macros {
