@@ -6,3 +6,5 @@ add_subdirectory(modules/zmk-driver-azoteq-tps43)
 add_subdirectory(modules/zmk-input-processor-three-finger-swipe)
 add_subdirectory(modules/zmk-input-processor-circle-keys)
 add_subdirectory(modules/zmk-input-processor-pinch-keys)
+# Nickey36A: run &bootloader on the left peripheral from a combo.
+add_subdirectory(modules/zmk-behavior-peripheral-invoke)
