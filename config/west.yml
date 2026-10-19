@@ -8,8 +8,8 @@ manifest:
       url-base: https://github.com/caksoylar
     - name: prospector  # <-- Prospector Scanner status advertisement
       url-base: https://github.com/t-ogura
-    - name: tmn10  # <-- IQS9151 driver (LalaPad Gen2 trackpad)
-      url-base: https://github.com/tmn10
+    - name: akeos-ppp  # <-- IQS9151 driver fork (LalaPad Gen2 trackpad + Nickey36A patch)
+      url-base: https://github.com/akeos-ppp
     - name: kot149  # <-- scroll snap
       url-base: https://github.com/kot149
   projects:
@@ -25,8 +25,8 @@ manifest:
       revision: v2.2.3
       path: modules/prospector-zmk-module
     - name: zmk-driver-iqs9151
-      remote: tmn10
-      revision: cd5990265140a91a6f0ce11104f79ef33f41b783  # same driver as LalaPad Gen2 trackpad_tmn10 (main)
+      remote: akeos-ppp
+      revision: 64a15a088cd78c37714d01a34cdc9722550bc634  # nickey36a: tmn10 cd59902 + 1F-only long-press, drag layer
     - name: zmk-scroll-snap
       remote: kot149
       revision: v1

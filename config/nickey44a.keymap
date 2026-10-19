@@ -70,6 +70,20 @@
             bindings = <&kp RIGHT_PARENTHESIS>;
             key-positions = <15 16>;
         };
+
+        /* Y + H + N + Right Alt: right half (central) enters the bootloader. */
+        boot_right {
+            bindings = <&bootloader>;
+            key-positions = <7 19 33 43>;
+            timeout-ms = <80>;
+        };
+
+        /* T + G + B + Left Ctrl: left half (peripheral) enters the bootloader. */
+        boot_left_combo {
+            bindings = <&boot_left>;
+            key-positions = <4 16 28 38>;
+            timeout-ms = <80>;
+        };
     };
 
     macros {
@@ -96,6 +110,19 @@
     };
 
     behaviors {
+        /*
+         * Combos always run on the central (right), so a plain &bootloader
+         * there would reset the right half. This sends it to the left
+         * peripheral (index 0) instead; the left must be connected.
+         */
+        boot_left: boot_left {
+            compatible = "zmk,behavior-peripheral-invoke";
+            #binding-cells = <0>;
+            bindings = <&bootloader>;
+            peripheral = <0>;
+            display-name = "Bootloader (left)";
+        };
+
         lt_to_layer_0: lt_to_layer_0 {
             compatible = "zmk,behavior-hold-tap";
             label = "LAYER_TAP_TO_0";
