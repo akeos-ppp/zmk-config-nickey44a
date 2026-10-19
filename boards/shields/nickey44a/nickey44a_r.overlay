@@ -143,7 +143,7 @@
      *   BTN_0 1F tap / hold       -> left click (drag)
      *   BTN_1 2F tap              -> right click
      *   BTN_2 3F tap              -> Launchpad (LG(L), same as &launch)
-     *   BTN_3 / BTN_4 3F swipe L/R -> mouse back / forward (MB4 / MB5)
+     *   BTN_3 / BTN_4 3F swipe L/R -> previous / next desktop (LC(LEFT) / LC(RIGHT))
      *   BTN_5 / BTN_6 3F swipe U/D -> Mission Control (LC(UP), same as &mission)
      *   BTN_7 2F pinch            -> MB5 held + wheel
      */
@@ -153,8 +153,8 @@
         type = <INPUT_EV_KEY>;
         codes = <INPUT_BTN_0 INPUT_BTN_1 INPUT_BTN_2 INPUT_BTN_3
                  INPUT_BTN_4 INPUT_BTN_5 INPUT_BTN_6 INPUT_BTN_7>;
-        bindings = <&mkp LCLK>, <&mkp RCLK>, <&kp LG(L)>, <&mkp MB4>,
-                   <&mkp MB5>, <&kp LC(UP_ARROW)>, <&kp LC(UP_ARROW)>, <&mkp MB5>;
+        bindings = <&mkp LCLK>, <&mkp RCLK>, <&kp LG(L)>, <&kp LC(LEFT)>,
+                   <&kp LC(RIGHT)>, <&kp LC(UP_ARROW)>, <&kp LC(UP_ARROW)>, <&mkp MB5>;
     };
 
     iqs9151_listener: iqs9151_listener {
