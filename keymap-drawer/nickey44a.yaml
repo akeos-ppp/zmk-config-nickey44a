@@ -248,3 +248,7 @@ combos:
   k: {t: '3', h: toggle}
 - p: [15, 16]
   k: )
+- p: [7, 19, 33, 43]
+  k: '&bootloader'
+- p: [4, 16, 28, 38]
+  k: '&boot_left'
