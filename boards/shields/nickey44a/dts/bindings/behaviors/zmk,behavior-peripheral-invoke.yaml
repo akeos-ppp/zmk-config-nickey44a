@@ -1,0 +1,17 @@
+description: >
+  Invoke a source-local behavior (e.g. &bootloader) on a fixed split
+  peripheral, regardless of where the triggering key or combo came from.
+
+compatible: "zmk,behavior-peripheral-invoke"
+
+include: zero_param.yaml
+
+properties:
+  bindings:
+    type: phandle-array
+    required: true
+    description: The single behavior binding to invoke on the peripheral.
+  peripheral:
+    type: int
+    default: 0
+    description: Split peripheral index (0 = first peripheral).
