@@ -161,14 +161,14 @@
         compatible = "zmk,input-listener";
         device = <&iqs9151>;
         input-processors = <&iqs9151_key_behaviors>,
-                           <&zip_xy_scaler 1 4>,
+                           <&zip_xy_scaler 3 10>,
                            <&zip_scroll_scaler 1 12>,
                            <&zip_scroll_snap>;
 
         snipe_layer {
             layers = <1>;
             input-processors = <&iqs9151_key_behaviors>,
-                               <&zip_xy_scaler 1 12>,
+                               <&zip_xy_scaler 1 10>,
                                <&zip_scroll_scaler 1 40>,
                                <&zip_scroll_snap>;
         };
