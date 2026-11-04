@@ -26,7 +26,7 @@ manifest:
       path: modules/prospector-zmk-module
     - name: zmk-driver-iqs9151
       remote: akeos-ppp
-      revision: 64a15a088cd78c37714d01a34cdc9722550bc634  # nickey36a: tmn10 cd59902 + 1F-only long-press, drag layer
+      revision: nickey36a-haptics  # 64a15a0 + DRV2605L/VG0825001U haptics, touch feedback
     - name: zmk-scroll-snap
       remote: kot149
       revision: v1

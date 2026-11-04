@@ -87,6 +87,17 @@
     };
 
     macros {
+        touch_on: touch_on {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&touch_feedback 1 &to 0>;
+        };
+        touch_off: touch_off {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&touch_feedback 0 &to 0>;
+        };
+
         to_layer_0: to_layer_0 {
             compatible = "zmk,behavior-macro-one-param";
             #binding-cells = <1>;
@@ -110,6 +121,12 @@
     };
 
     behaviors {
+        touch_feedback: touch_feedback {
+            compatible = "zmk,behavior-touch-feedback";
+            #binding-cells = <1>;
+            display-name = "Touch feedback (0 off / 1 on)";
+        };
+
         /*
          * Combos always run on the central (right), so a plain &bootloader
          * there would reset the right half. This sends it to the left
@@ -166,7 +183,7 @@
         layer_3 {
             bindings = <
 &bt BT_CLR      &bt BT_SEL 0  &bt BT_SEL 1  &bt BT_SEL 2  &bt BT_SEL 3  &bt BT_SEL 4                    &trans  &trans  &trans  &trans  &trans  &trans
-&bt BT_CLR_ALL  &trans        &trans        &trans        &trans        &trans                          &trans  &trans  &trans  &trans  &trans  &trans
+&bt BT_CLR_ALL  &trans        &trans        &trans        &trans        &trans                          &trans  &touch_on  &touch_off  &trans  &trans  &trans
 &studio_unlock  &trans        &trans        &trans        &trans        &trans        &trans    &trans  &trans  &trans  &trans  &trans  &trans  &trans
                                                           &trans        &trans        &trans    &trans  &trans  &trans
             >;
