@@ -17,7 +17,7 @@ Nickey36A / Nickey44A 触覚フィードバック（左右）
 1. システムレイヤーへ入る：左親指の Ctrl＋Space＋Backspace を同時押し。
 2. H：左右ともON。J：左右ともOFF。どちらも実行後に通常レイヤーへ戻る。
 ・左右が接続された状態で操作する。片側を再起動した場合はもう一度押す。
-・ON/OFFは保存しない。再起動時はOFF。
+・起動時はON（CONFIG_INPUT_IQS9151_TOUCH_FEEDBACK_DEFAULT_ON=y）。J でOFFにしても保存しないので、再起動するとONに戻る。
 ・ZMK Studioで以前のキー配置を保存している場合はその配置が優先されるので、
   システムレイヤーのH/J位置へ touch_on / touch_off を割り当てる。
 
