@@ -1,20 +1,9 @@
-if SHIELD_NICKEY44A_R
+# nemu-link: both halves are 2.4GHz peripherals; the nemu-link dongle is
+# the split central.
+if SHIELD_NICKEY44A_R || SHIELD_NICKEY44A_L
 
 config ZMK_KEYBOARD_NAME
     default "Nickey44A-PAD"
-
-config ZMK_BLE
-    default y
-
-config ZMK_SPLIT_ROLE_CENTRAL
-    default y
-
-endif
-
-if SHIELD_NICKEY44A_R || SHIELD_NICKEY44A_L
-
-config NFCT_PINS_AS_GPIOS
-    default y
 
 config ZMK_SPLIT
     default y

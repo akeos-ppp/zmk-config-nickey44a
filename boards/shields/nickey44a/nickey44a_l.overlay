@@ -10,8 +10,8 @@
  *   SCL  = XIAO NFC2/P0.10
  *   RDY  = XIAO P1.10 (IQS9151 RDY, active low)
  *   NRST = XIAO P0.16 (held high; leave unconnected if the module has none)
- * All events are forwarded unchanged; the right central maps them
- * (volume circle, Back/Forward, tab switching, clicks).
+ * All events are forwarded unchanged (input-split reg 0); the nemu-link
+ * dongle maps them (volume circle, Back/Forward, tab switching, clicks).
  */
 
 &uicr {
@@ -93,7 +93,7 @@
 /* Haptic driver shares the existing 3.3V I2C bus; no extra GPIO. */
 &i2c0 {
     haptic: drv2605@5a {
-        compatible = "ti,drv2605";
+        compatible = "zmk,drv2605";
         reg = <0x5a>;
         status = "okay";
         actuator-type = "lra";

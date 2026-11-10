@@ -2,4 +2,6 @@ on: [push, pull_request, workflow_dispatch]
 
 jobs:
   build:
-    uses: zmkfirmware/zmk/.github/workflows/build-user-config.yml@v0.3.0
+    # nemu-link uses a ZMK fork based on Zephyr 4.1 (ZMK main), so use the
+    # matching user-config workflow.
+    uses: zmkfirmware/zmk/.github/workflows/build-user-config.yml@main

@@ -3,4 +3,7 @@ build:
   kconfig: Kconfig
   settings:
     board_root: .
-    dts_root: modules/zmk-input-processor-touch-inertia
+    # dts/bindings holds every custom binding (input processors,
+    # peripheral-invoke, TPS43) so the nemu-link dongle, which does not use
+    # the nickey44a shield, can find them too.
+    dts_root: .

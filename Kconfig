@@ -1,2 +1,12 @@
 # Vendored TPS43 driver Kconfig (CONFIG_INPUT_TPS43).
 rsource "modules/zmk-driver-azoteq-tps43/Kconfig"
+
+# Battery voltage divider with a custom mV -> % curve (Ni-MH).
+DT_COMPAT_ZMK_BATTERY_VOLTAGE_DIVIDER_THRESHOLDS := zmk,battery-voltage-divider-thresholds
+
+config NICKEY_BATTERY_VOLTAGE_DIVIDER_THRESHOLDS
+    bool
+    default $(dt_compat_enabled,$(DT_COMPAT_ZMK_BATTERY_VOLTAGE_DIVIDER_THRESHOLDS))
+    select ADC
+    select ZMK_BATTERY
+    depends on SENSOR

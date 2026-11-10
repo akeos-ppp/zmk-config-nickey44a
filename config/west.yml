@@ -1,32 +1,29 @@
 manifest:
   remotes:
-    - name: zmkfirmware
-      url-base: https://github.com/zmkfirmware
-    - name: cormoran
-      url-base: https://github.com/cormoran
     - name: caksoylar  # <-- RGB LED
       url-base: https://github.com/caksoylar
-    - name: prospector  # <-- Prospector Scanner status advertisement
-      url-base: https://github.com/t-ogura
     - name: akeos-ppp  # <-- IQS9151 driver fork (LalaPad Gen2 trackpad + Nickey36A patch)
       url-base: https://github.com/akeos-ppp
     - name: kot149  # <-- scroll snap
       url-base: https://github.com/kot149
   projects:
+    # nemu-link: ZMK fork (Zephyr 4.1) + 2.4GHz receiver/peripheral module
     - name: zmk
-      remote: cormoran
-      revision: 3931facea7507151a53f209ca4f8a717fa6bd400 # v0.3-branch+dya
+      url: https://github.com/sekigon-gonnoc/zmk
+      revision: v0.4+nemu-link
       import: app/west.yml
+    - name: zmk-feature-nemu-link
+      url: https://github.com/sekigon-gonnoc/zmk-feature-nemu-link
+      revision: zmk-v0.4
+      import: config/west.yml
     - name: zmk-rgbled-widget
       remote: caksoylar
-      revision: 8756cb7b8114069fa3c25c6f6c990f24988fceff # v0.3
-    - name: prospector-zmk-module
-      remote: prospector
-      revision: v2.2.3
-      path: modules/prospector-zmk-module
+      revision: main
     - name: zmk-driver-iqs9151
       remote: akeos-ppp
-      revision: nickey36a-haptics  # 64a15a0 + DRV2605L/VG0825001U haptics, touch feedback
+      # nickey36a-haptics + DRV2605 compatible renamed to "zmk,drv2605"
+      # ("ti,drv2605" clashes with the Zephyr 4.1 haptics binding)
+      revision: nickey36a-haptics-zephyr4
     - name: zmk-scroll-snap
       remote: kot149
       revision: v1

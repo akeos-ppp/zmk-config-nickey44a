@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+
+description: |
+  Battery SoC monitoring using a voltage divider, with a custom
+  millivolt -> percent curve (vendored in this config; replaces the
+  "mv-to-pct-thresholds" property of the cormoran ZMK fork).
+
+compatible: "zmk,battery-voltage-divider-thresholds"
+
+include: voltage-divider.yaml
+
+properties:
+  mv-to-pct-thresholds:
+    type: array
+    required: true
+    description: |
+      Battery millivolts at evenly spaced charge levels, ascending: the first
+      entry is 0 %, the last is 100 % (11 entries = every 10 %).
