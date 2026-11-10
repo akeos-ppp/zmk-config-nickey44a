@@ -10,3 +10,9 @@ config NICKEY_BATTERY_VOLTAGE_DIVIDER_THRESHOLDS
     select ADC
     select ZMK_BATTERY
     depends on SENSOR
+
+# The nemu-link dongle board is built for ZMK (UF2 bootloader, settings
+# storage) but does not declare it, which makes the ZMK user-config workflow
+# fail its "board without explicit ZMK compat" check.
+config ZMK_BOARD_COMPAT
+    default y if BOARD_NEMU_LINK_DONGLE

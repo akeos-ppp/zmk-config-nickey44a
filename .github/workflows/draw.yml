@@ -11,5 +11,6 @@ jobs:
     permissions:
       contents: write
     with:
-      keymap_patterns: "config/*.keymap"
+      # nemu-link-dongle.keymap only includes nickey44a.keymap; draw that one.
+      keymap_patterns: "config/nickey44a.keymap"
       output_folder: "keymap-drawer"
