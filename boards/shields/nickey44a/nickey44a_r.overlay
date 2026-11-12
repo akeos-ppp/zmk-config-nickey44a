@@ -97,17 +97,4 @@
             ;
 };
 
-/* Haptic driver shares the existing 3.3V I2C bus; no extra GPIO. */
-&i2c0 {
-    haptic: drv2605@5a {
-        compatible = "zmk,drv2605";
-        reg = <0x5a>;
-        status = "okay";
-        actuator-type = "lra";
-        resonance-hz = <240>;
-        rated-voltage-mv = <1200>;
-        overdrive-voltage-mv = <1700>; /* PEAK, approximately 1.2 Vrms sine */
-        library = <6>;
-    };
-};
-&iqs9151 { haptic-dev = <&haptic>; };
+/* No haptics on the right: the DRV2605L / VG0825001U board was removed. */
